@@ -114,9 +114,9 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         전문적이고 명확하게 요약해 주세요.
         """
 
-        # 💡 최신 표준 모델명인 'gemini-2.0-flash' 적용
+        # 💡 [핵심 수정] 가장 표준적인 gemini-2.5-flash 모델 호출
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             contents=prompt,
         )
         return response.text
