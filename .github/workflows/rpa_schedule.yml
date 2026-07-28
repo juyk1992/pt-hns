@@ -1,10 +1,10 @@
-Name: Daily PortMIS RPA Bot Tracker
+name: Daily PortMIS RPA Bot Tracker
 
 on:
   schedule:
-    # 💡 1시간마다 자동 실행 (매시 정각)
+    # 💡 매시 17분마다 실행 (정각 0분 지연 및 과부하 방지)
     - cron: '17 * * * *'
-  workflow_dispatch: # 버튼 클릭으로 수동 실행도 가능하게 설정
+  workflow_dispatch:
 
 jobs:
   run-rpa:
@@ -24,7 +24,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y chromium-browser chromium-chromedriver
-        # 기존 링크나 파일이 있어도 강제로 덮어쓰기(-sf) 및 파일 존재 체크
         sudo ln -sf /usr/bin/chromium-browser /usr/bin/google-chrome || true
 
     - name: 4. 파이썬 의존성 패키지 설치
@@ -45,6 +44,5 @@ jobs:
         git config --global user.name 'GitHub Action Bot'
         git config --global user.email 'action@github.com'
         git add hns_fully_integrated_report.csv
-        # 💡 커밋 메시지를 '시간별 갱신'으로 변경
         git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 시간별 갱신" || echo "변경사항 없음"
         git push
