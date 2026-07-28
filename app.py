@@ -114,15 +114,25 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         전문적이고 명확하게 요약해 주세요.
         """
 
-        # 💡 [핵심 수정] 가장 표준적인 gemini-2.5-flash 모델 호출
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        return response.text
-    except Exception as e:
-        return f"Gemini API 호출 중 오류 발생: {e}"
+        # 💡 [핵심] 여러 모델명을 순서대로 시도하여 성공하는 모델로 응답을 가져옴
+        candidate_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+        
+        last_exception = None
+        for model_name in candidate_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                return response.text
+            except Exception as e:
+                last_exception = e
+                continue
+                
+        return f"Gemini API 호출 중 오류 발생: {last_exception}"
 
+    except Exception as e:
+        return f"Gemini API 클라이언트 생성 오류: {e}"
 # ==========================================
 # 3. RPA 통합 데이터 로드
 # ==========================================
