@@ -23,6 +23,8 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y chromium-browser chromium-chromedriver
+        # 셀레니움이 찾는 기본 위치에 크롬 연결고리 생성
+        sudo ln -s /usr/bin/chromium-browser /usr/bin/google-chrome
 
     - name: 4. 파이썬 의존성 패키지 설치
       run: |
