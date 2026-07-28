@@ -24,6 +24,12 @@ def run_real_rpa_crawler():
     options.add_argument('--window-size=1920,1080')
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+    chrome_binaries = ["/usr/bin/chromium-browser", "/usr/bin/google-chrome", "/usr/bin/chromium"]
+    for bin_path in chrome_binaries:
+        if os.path.exists(bin_path):
+            options.binary_location = bin_path
+            break
+
     driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, 20)
     
