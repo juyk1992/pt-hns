@@ -114,31 +114,25 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         전문적이고 명확하게 요약해 주세요.
         """
 
-        # 💡 [핵심] 현재 계정에서 지원하는 모델 목록을 직접 확인 후 사용 가능한 모델로 자동 호출
-        target_model = None
-        try:
-            available_models = [m.name for m in client.models.list() if 'generateContent' in getattr(m, 'supported_generation_methods', []) or True]
-            # 모델 이름에서 'models/' 접두사 처리 및 flash / pro 모델 찾기
-            for m in available_models:
-                m_clean = m.replace('models/', '')
-                if 'flash' in m_clean or 'gemini' in m_clean:
-                    target_model = m_clean
-                    break
-        except Exception as list_err:
-            print(f"모델 리스트 조회 오류: {list_err}")
-
-        # 자동 탐색 실패 시 기본 우선순위 모델명 지정
-        if not target_model:
-            target_model = 'gemini-2.5-flash'
-
-        response = client.models.generate_content(
-            model=target_model,
-            contents=prompt,
-        )
-        return response.text
+        # 💡 보주신 화면에 표출된 최신 모델인 'gemini-3.5-flash' 및 백업 모델 시도
+        candidate_models = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']
+        
+        last_exception = None
+        for model_id in candidate_models:
+            try:
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=prompt,
+                )
+                return response.text
+            except Exception as e:
+                last_exception = e
+                continue
+                
+        return f"Gemini API 호출 중 오류 발생: {last_exception}"
 
     except Exception as e:
-        return f"Gemini API 호출 중 오류 발생: {e}"
+        return f"Gemini API 클라이언트 생성 오류: {e}"
         
 # ==========================================
 # 3. RPA 통합 데이터 로드
