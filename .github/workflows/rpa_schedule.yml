@@ -1,0 +1,46 @@
+name: Daily PortMIS RPA Bot Tracker
+
+on:
+  schedule:
+    # 매일 아침 9시 (UTC 기준 00:00 / KST 기준 09:00) 자동 실행
+    - cron: '0 0 * * *'
+  workflow_dispatch: # 버튼 클릭으로 수동 실행도 가능하게 설정
+
+jobs:
+  run-rpa:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 1. GitHub 저장소 코드 체크아웃
+      uses: actions/checkout@v3
+
+    - name: 2. 파이썬 환경 세팅
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 3. Chrome 브라우저 및 드라이버 설치
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y chromium-browser chromium-chromedriver
+
+    - name: 4. 파이썬 의존성 패키지 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install selenium
+
+    - name: 5. RPA 봇 스크립트 실행
+      env:
+        PORTMIS_ID: ${{ secrets.PORTMIS_ID }}
+        PORTMIS_PW: ${{ secrets.PORTMIS_PW }}
+      run: |
+        python rpa_bot.py
+
+    - name: 6. 갱신된 CSV 파일 GitHub 저장소에 자동으로 Commit & Push
+      run: |
+        git config --global user.name 'GitHub Action Bot'
+        git config --global user.email 'action@github.com'
+        git add hns_fully_integrated_report.csv
+        git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 일일 갱신" || echo "변경사항 없음"
+        git push
