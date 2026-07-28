@@ -84,7 +84,7 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
     두 API에서 가져온 방대한 데이터를 Gemini API를 통해 현장 맞춤형으로 요약
     """
     if not GEMINI_API_KEY or GEMINI_API_KEY == "여러분의_GEMINI_API_KEY":
-        return "⚠️ Gemini API 키가 설정되지 않았습니다. 코드를 확인해주세요."
+        return "⚠️ Gemini API 키가 설정되지 않았습니다. Streamlit Secrets를 확인해주세요."
         
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
@@ -114,8 +114,9 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         전문적이고 명확하게 요약해 주세요.
         """
 
+        # 💡 [핵심] 정식 모델명인 'gemini-1.5-flash'로 변경
         response = client.models.generate_content(
-            model='gemini-2.5-flash', # 빠르고 효율적인 모델 활용
+            model='gemini-1.5-flash',
             contents=prompt,
         )
         return response.text
