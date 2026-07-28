@@ -1,9 +1,9 @@
-name: Daily PortMIS RPA Bot Tracker
+Name: Daily PortMIS RPA Bot Tracker
 
 on:
   schedule:
-    # 매일 아침 9시 (UTC 기준 00:00 / KST 기준 09:00) 자동 실행
-    - cron: '0 * * * *'
+    # 💡 1시간마다 자동 실행 (매시 정각)
+    - cron: '17 * * * *'
   workflow_dispatch: # 버튼 클릭으로 수동 실행도 가능하게 설정
 
 jobs:
@@ -45,5 +45,6 @@ jobs:
         git config --global user.name 'GitHub Action Bot'
         git config --global user.email 'action@github.com'
         git add hns_fully_integrated_report.csv
-        git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 일일 갱신" || echo "변경사항 없음"
+        # 💡 커밋 메시지를 '시간별 갱신'으로 변경
+        git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 시간별 갱신" || echo "변경사항 없음"
         git push
