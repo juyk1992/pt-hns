@@ -9,13 +9,21 @@ import os
 # ==========================================
 # ⚙️ 계정 설정 영역
 # ==========================================
-PORTMIS_ID = os.getenv("PORTMIS_ID")
-PORTMIS_PW = os.getenv("PORTMIS_PW")
+PORTMIS_ID = os.getenv("PORTMIS_ID", "")
+PORTMIS_PW = os.getenv("PORTMIS_PW", "")
 
 def run_real_rpa_crawler():
     print("🤖 [종합 데이터 통합 마스터 RPA] 포트미스 자동화 봇 가동...")
     
+    # 💡 [핵심] GitHub Actions (우분투 리눅스) 실행을 위한 Chrome Headless 옵션 추가
     options = webdriver.ChromeOptions()
+    options.add_argument('--headless')          # 화면 없이 실행
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
     driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, 20)
     
@@ -70,7 +78,7 @@ def run_real_rpa_crawler():
         time.sleep(5)
 
         # ------------------------------------------
-        # 6단계: 청코드 '031' 입력 및 '평택' 갱신 트리거 실행 (복구 완료)
+        # 6단계: 청코드 '031' 입력 및 '평택' 갱신 트리거 실행
         # ------------------------------------------
         print("👉 [6단계] 청코드 '031' 입력 및 갱신 이벤트 실행...")
         driver.execute_script("""
@@ -98,7 +106,7 @@ def run_real_rpa_crawler():
         time.sleep(5)
 
         # ------------------------------------------
-        # 8단계: 선박 리스트 순회 및 신고서 + 적하일람표 데이터 통합 수집
+        # 8단계: 선박 리스트 순회 및 데이터 통합 수집
         # ------------------------------------------
         print("👉 [8단계] 선박 리스트 분석 및 양쪽 탭 데이터 수집 시작...")
         
