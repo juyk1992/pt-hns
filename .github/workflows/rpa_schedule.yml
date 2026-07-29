@@ -6,6 +6,10 @@ on:
     - cron: '17 * * * *'
   workflow_dispatch:
 
+# 💡 GitHub Bot이 저장소에 git push 할 수 있도록 쓰기 권한 부여
+permissions:
+  contents: write
+
 jobs:
   run-rpa:
     runs-on: ubuntu-latest
