@@ -47,6 +47,6 @@ jobs:
         git config --global user.name 'GitHub Action Bot'
         git config --global user.email 'action@github.com'
         git add hns_fully_integrated_report.csv
-        git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 4시간별 갱신" || echo "변경사항 없음"
+        git commit -m "🤖 [포트미스 자동동기화] 평택항 HNS 위험물반입현황" || echo "변경사항 없음"
         git pull --rebase origin main || true
         git push
