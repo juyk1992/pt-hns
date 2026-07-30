@@ -17,7 +17,7 @@ def run_real_rpa_crawler():
     print("🤖 [종합 데이터 통합 마스터 RPA] 포트미스 자동화 봇 가동...")
     
     options = webdriver.ChromeOptions()
-    # options.add_argument('--headless')          # 화면 없이 실행
+    options.add_argument('--headless')          # 화면 없이 실행
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
