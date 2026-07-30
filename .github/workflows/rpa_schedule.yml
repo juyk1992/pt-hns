@@ -2,7 +2,7 @@ name: Daily PortMIS RPA Bot Tracker
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '21 * * * *'
   workflow_dispatch:
 
 # 💡 GitHub Bot이 저장소에 git push 할 수 있도록 쓰기 권한 부여
