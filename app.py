@@ -40,7 +40,6 @@ def find_hns_raw_text(query):
         title = item.get('title_header', '').upper()
         synonyms = item.get('synonyms', '').upper()
         
-        # UN번호 완전치, 제목/유사명 부분 일치 탐색
         if (q and q == unno) or (q in title) or (q in synonyms):
             return item.get('raw_full_text', '')
     return None
@@ -101,11 +100,8 @@ def fetch_chem_safety_info(chem_name):
 # 3. Gemini 자연어 매핑 및 풍부화된 AI 요약 모듈
 # ==========================================
 def map_search_query_with_gemini(query_text):
-    """자연어/화학식/관용명 검색어를 공식 물질명 및 UNNO로 정제"""
-    # 1. 로컬 DB 텍스트에서 빠른 매칭 시도
     raw_match = find_hns_raw_text(query_text)
     if raw_match:
-        # 제목 첫 줄 등에서 추출
         lines = [l.strip() for l in raw_match.split('\n') if l.strip()]
         title = lines[0] if lines else query_text
         return {"chem_ko": title, "chem_eng": title, "unno": "0000"}
@@ -127,14 +123,12 @@ def map_search_query_with_gemini(query_text):
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
 
 def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
-    """HNS 정보집 원본 텍스트 + 공공 API 전체 수집 항목 종합 요약"""
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
         
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # HNS 원본 텍스트 추출
         hns_raw_text = find_hns_raw_text(unno) or find_hns_raw_text(chem_name)
         hns_context = f"[해양경찰청 HNS 정보집 원본 문서 정보]\n{hns_raw_text}\n" if hns_raw_text else "[해양경찰청 HNS 정보집 정보]\n매칭 데이터 참조\n"
 
@@ -192,7 +186,7 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. RPA 통합 데이터 로드
+# 4. RPA 통합 데이터 로드 (확장 컬럼 반영)
 # ==========================================
 @st.cache_data
 def load_integrated_hns_data():
@@ -247,7 +241,13 @@ else:
     filtered_df = df[df['선박명(선택)'] == selected_ship] if selected_ship != "전체보기" else df
 
     st.write(f"총 **{len(filtered_df)}건**의 위험물 반입 신고가 등록되어 있습니다.")
-    st.dataframe(filtered_df[['선박명(선택)', '호출부호', '하역업체', '하역기간', '사용장소', 'UNNO', '품명', '중량', '단위', '수하인', '송하인']], use_container_width=True)
+    
+    # 💡 신규 확장 컬럼 반영 그리드 테이블 표출
+    display_cols = [
+        '선박명(선택)', '호출부호', '사용목적', '운송형태', '화물명', 
+        '하역업체', '하역기간', '사용장소', '전출항지', 'UNNO', 'IMDG', '품명', '중량', '단위'
+    ]
+    st.dataframe(filtered_df[[c for c in display_cols if c in filtered_df.columns]], use_container_width=True)
 
     st.divider()
     st.subheader("🚢 선박별 상세 운송 정보 및 지능형 비상 대응")
@@ -257,24 +257,28 @@ else:
         call_sign = ship_data['호출부호'].iloc[0]
         location = ship_data['사용장소'].iloc[0] if pd.notna(ship_data['사용장소'].iloc[0]) else "지정 장소 미상"
         work_period = ship_data['하역기간'].iloc[0]
+        use_purpose = ship_data['사용목적'].iloc[0] if '사용목적' in ship_data.columns else "-"
+        transport_type = ship_data['운송형태'].iloc[0] if '운송형태' in ship_data.columns else "-"
+        prev_port = ship_data['전출항지'].iloc[0] if '전출항지' in ship_data.columns else "-"
         
         with st.expander(f"⚓ [{ship}] (호출부호: {call_sign}) ｜ 하역장소: {location} ｜ 기간: {work_period}"):
-            st.markdown(f"**🏢 하역업체:** {ship_data['하역업체'].iloc[0]} ｜ **반입구분:** {ship_data['반입구분'].iloc[0]}")
+            st.markdown(f"**🏢 하역업체:** {ship_data['하역업체'].iloc[0]} ｜ **사용목적:** {use_purpose} ｜ **운송형태:** {transport_type} ｜ **전출항지:** {prev_port}")
             st.markdown("---")
             st.markdown("#### 📦 적재된 위험물 목록")
             
             for idx, row in ship_data.iterrows():
-                unno = str(row['UNNO']).zfill(4)
-                chem_name = str(row['품명'])
-                weight = str(row['중량'])
-                unit = str(row['단위'])
+                unno = str(row['UNNO']).zfill(4) if pd.notna(row['UNNO']) else "0000"
+                chem_name = str(row['품명']) if pd.notna(row['품명']) else "정보 없음"
+                weight = str(row['중량']) if pd.notna(row['중량']) else "-"
+                unit = str(row['단위']) if pd.notna(row['단위']) else ""
+                imdg = str(row['IMDG']) if 'IMDG' in row and pd.notna(row['IMDG']) else "-"
                 
-                if unno == 'nan' or not unno.strip():
+                if unno == '0000' or not unno.strip():
                     continue
                 
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.write(f"🔹 **UN NO:** `{unno}` ｜ **품명:** **{chem_name}** ｜ **수량:** {weight} {unit}")
+                    st.write(f"🔹 **UN NO:** `{unno}` ｜ **IMDG:** `{imdg}` ｜ **품명:** **{chem_name}** ｜ **수량:** {weight} {unit}")
                 with col2:
                     button_key = f"btn_{ship}_{idx}_{unno}"
                     if st.button("🤖 AI 대응 가이드 생성", key=button_key):
@@ -283,7 +287,7 @@ else:
                         st.session_state['active_ship'] = ship
 
 # ==========================================
-# 6. AI 대응 가이드 출력 영역 (체크리스트 완전 제거)
+# 6. AI 대응 가이드 출력 영역
 # ==========================================
 if 'active_chem' in st.session_state:
     st.divider()
