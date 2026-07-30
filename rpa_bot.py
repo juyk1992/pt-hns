@@ -1,7 +1,8 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
+from datetime import datetime, timedelta
 import pandas as pd
 import time
 import os
@@ -15,7 +16,7 @@ PORTMIS_PW = os.getenv("PORTMIS_PW", "")
 def run_real_rpa_crawler():
     print("🤖 [종합 데이터 통합 마스터 RPA] 포트미스 자동화 봇 가동...")
     
-    # 💡 [핵심] GitHub Actions (우분투 리눅스) 실행을 위한 Chrome Headless 옵션 추가
+    # 💡 GitHub Actions (우분투 리눅스) 실행을 위한 Chrome Headless 옵션 설정
     options = webdriver.ChromeOptions()
     options.add_argument('--headless')          # 화면 없이 실행
     options.add_argument('--no-sandbox')
@@ -97,19 +98,66 @@ def run_real_rpa_crawler():
                 codeInput.blur();
             }
         """)
-        print("⏳ [대기] 청이름('평택') 자동 갱신 대기 중 (3초)...")
-        time.sleep(3)
+        time.sleep(2)
+
+        # ------------------------------------------
+        # 6-1단계: KST 기준 오늘 날짜 자동 입력
+        # ------------------------------------------
+        kst_now = datetime.utcnow() + timedelta(hours=9)
+        today_str = kst_now.strftime("%Y%m%d") # 예: '20260730'
+        
+        print(f"👉 [6-1단계] 신고일자 시작일/종료일 오늘 날짜({today_str}) 설정 중...")
+        driver.execute_script(f"""
+            var fromInput = document.getElementById('mf_tacMain_contents_M9024_0_body_calfromReqstDt_input') || document.getElementById('mf_tacMain_contents_M9024_body_calfromReqstDt_input');
+            var toInput = document.getElementById('mf_tacMain_contents_M9024_0_body_caltoReqstDt_input') || document.getElementById('mf_tacMain_contents_M9024_body_caltoReqstDt_input');
+            
+            if (fromInput) {{
+                fromInput.value = '{today_str}';
+                fromInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                fromInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+            if (toInput) {{
+                toInput.value = '{today_str}';
+                toInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                toInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+        """)
+        time.sleep(2)
 
         # ------------------------------------------
         # 7단계: 메인 검색 버튼 클릭
         # ------------------------------------------
         print("👉 [7단계] 메인 조회 검색 버튼 클릭...")
         search_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//a[@title='검색' and text()='검색']"))
+            EC.element_to_be_clickable((By.XPATH, "//a[@title='검색' and text()='검색'] | //a[text()='조회']"))
         )
         driver.execute_script("arguments[0].click();", search_btn)
-        print("⏳ 데이터 조회 렌더링 대기 중 (5초)...")
+        print("⏳ 데이터 1차 조회 대기 중 (5초)...")
         time.sleep(5)
+
+        # ------------------------------------------
+        # 7-1단계: '100개씩 보기' 선택 및 재조회
+        # ------------------------------------------
+        print("👉 [7-1단계] 목록 표시 수 '100개씩 보기'로 변경 중...")
+        try:
+            select_element = driver.execute_script("""
+                return document.getElementById('mf_tacMain_contents_M9024_0_body_udcGridPageView_sbxRecordCount_input_0') ||
+                       document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_sbxRecordCount_input_0');
+            """)
+            if select_element:
+                select_box = Select(select_element)
+                select_box.select_by_visible_text("100개씩 보기")
+                
+                # 변경 이벤트 트리거로 웹스퀘어 목록 갱신
+                driver.execute_script("""
+                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                """, select_element)
+                print("✅ '100개씩 보기' 적용 완료! 100건 데이터 재로딩 대기 중 (5초)...")
+                time.sleep(5)
+            else:
+                print("⚠️ '100개씩 보기' 드롭다운을 찾지 못하여 기본 갯수로 진행합니다.")
+        except Exception as sel_err:
+            print(f"⚠️ '100개씩 보기' 변경 중 소폭 예외 발생 (기존 개수로 계속): {sel_err}")
 
         # ------------------------------------------
         # 8단계: 선박 리스트 순회 및 데이터 통합 수집
@@ -117,7 +165,7 @@ def run_real_rpa_crawler():
         print("👉 [8단계] 선박 리스트 분석 및 양쪽 탭 데이터 수집 시작...")
         
         row_indices = driver.execute_script("""
-            var cells = document.querySelectorAll('[id^="mf_tacMain_contents_M9024_body_tab1_grid_cell_"][id$="_3"]');
+            var cells = document.querySelectorAll('[id*="mf_tacMain_contents_M9024_"][id*="_tab1_grid_cell_"][id$="_3"]');
             var validIndices = [];
             for (var i = 0; i < cells.length; i++) {
                 if (cells[i].offsetParent !== null) {
@@ -134,8 +182,12 @@ def run_real_rpa_crawler():
             
             try:
                 # 1. 선박 셀 클릭
-                cell_id = f"mf_tacMain_contents_M9024_body_tab1_grid_cell_{i}_3"
-                ship_cell = wait.until(EC.element_to_be_clickable((By.ID, cell_id)))
+                cell_id_script = f"""
+                    var el = document.querySelector('[id*="mf_tacMain_contents_M9024_"][id*="_tab1_grid_cell_{i}_3"]');
+                    return el ? el.id : 'mf_tacMain_contents_M9024_body_tab1_grid_cell_{i}_3';
+                """
+                target_cell_id = driver.execute_script(cell_id_script)
+                ship_cell = wait.until(EC.element_to_be_clickable((By.ID, target_cell_id)))
                 ship_name = ship_cell.text.strip()
                 
                 driver.execute_script("arguments[0].click();", ship_cell)
@@ -143,60 +195,62 @@ def run_real_rpa_crawler():
 
                 # 2. [위험물반입신고서 탭 정보 수집]
                 report_info = driver.execute_script("""
+                    var getVal = function(idPattern) {
+                        var el = document.querySelector('[id*="mf_tacMain_contents_M9024_"][id*="' + idPattern + '"]');
+                        return el ? el.value : '';
+                    };
                     return {
-                        '청명': document.getElementById('mf_tacMain_contents_M9024_body_input266') ? document.getElementById('mf_tacMain_contents_M9024_body_input266').value : '',
-                        '반입구분': document.getElementById('mf_tacMain_contents_M9024_body_input268') ? document.getElementById('mf_tacMain_contents_M9024_body_input268').value : '',
-                        '호출부호': document.getElementById('mf_tacMain_contents_M9024_body_input269') ? document.getElementById('mf_tacMain_contents_M9024_body_input269').value : '',
-                        '선명': document.getElementById('mf_tacMain_contents_M9024_body_input270') ? document.getElementById('mf_tacMain_contents_M9024_body_input270').value : '',
-                        '화물명': document.getElementById('mf_tacMain_contents_M9024_body_input399') ? document.getElementById('mf_tacMain_contents_M9024_body_input399').value : '',
-                        '컨테이너갯수': document.getElementById('mf_tacMain_contents_M9024_body_input297') ? document.getElementById('mf_tacMain_contents_M9024_body_input297').value : '',
-                        '총량': document.getElementById('mf_tacMain_contents_M9024_body_input298') ? document.getElementById('mf_tacMain_contents_M9024_body_input298').value : '',
-                        '하역업체': document.getElementById('mf_tacMain_contents_M9024_body_input302') ? document.getElementById('mf_tacMain_contents_M9024_body_input302').value : '',
-                        '하역기간시작': document.getElementById('mf_tacMain_contents_M9024_body_input329') ? document.getElementById('mf_tacMain_contents_M9024_body_input329').value : '',
-                        '하역기간종료': document.getElementById('mf_tacMain_contents_M9024_body_input330') ? document.getElementById('mf_tacMain_contents_M9024_body_input330').value : '',
-                        '사용장소': document.getElementById('mf_tacMain_contents_M9024_body_input310') ? document.getElementById('mf_tacMain_contents_M9024_body_input310').value : '',
-                        '신고일시': document.getElementById('mf_tacMain_contents_M9024_body_input331') ? document.getElementById('mf_tacMain_contents_M9024_body_input331').value : ''
+                        '청명': getVal('input266'),
+                        '반입구분': getVal('input268'),
+                        '호출부호': getVal('input269'),
+                        '선명': getVal('input270'),
+                        '화물명': getVal('input399'),
+                        '컨테이너갯수': getVal('input297'),
+                        '총량': getVal('input298'),
+                        '하역업체': getVal('input302'),
+                        '하역기간시작': getVal('input329'),
+                        '하역기간종료': getVal('input330'),
+                        '사용장소': getVal('input310'),
+                        '신고일시': getVal('input331')
                     };
                 """)
 
                 # 3. [위험물적하일람표] 탭으로 이동
-                tab_id = "mf_tacMain_contents_M9024_body_tabDgst_tab_tabs2_tabHTML"
-                cargo_tab = wait.until(EC.element_to_be_clickable((By.ID, tab_id)))
-                driver.execute_script("arguments[0].click();", cargo_tab)
+                cargo_tab = driver.execute_script("""
+                    return document.querySelector('[id*="mf_tacMain_contents_M9024_"][id*="_tabDgst_tab_tabs2_tabHTML"]');
+                """)
+                if cargo_tab:
+                    driver.execute_script("arguments[0].click();", cargo_tab)
                 time.sleep(2.5)
 
                 # 4. 적하일람표 테이블 데이터 정밀 파싱
                 cargo_rows = driver.execute_script("""
                     var extractedData = [];
-                    for (var r = 0; r < 20; r++) {
-                        var cellNo = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_0');
+                    for (var r = 0; r < 50; r++) {
+                        var cellNo = document.querySelector('[id*="mf_tacMain_contents_M9024_"][id*="_tab3_grid_cell_' + r + '_0"]');
                         if (!cellNo || cellNo.offsetParent === null) break;
                         
-                        var rnum = cellNo.innerText.trim();
-                        var ispctn = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_1').innerText.trim();
-                        var docSeq = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_2').innerText.trim();
-                        var unno = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_3').innerText.trim();
-                        var imdg = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_4').innerText.trim();
-                        var productName = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_5').innerText.trim();
-                        var weight = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_6').innerText.trim();
-                        var unit = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_7').innerText.trim();
-                        var entrpsCd = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_8').innerText.trim();
-                        var entrpsNm = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_10').innerText.trim();
-                        
-                        var placeNm = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_16');
-                        var tkinDt = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_17');
-                        var workKind = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_18');
-                        var consge = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_19');
-                        var secong = document.getElementById('mf_tacMain_contents_M9024_body_tab3_grid_cell_' + r + '_20');
+                        var getCellText = function(colIdx) {
+                            var el = document.querySelector('[id*="mf_tacMain_contents_M9024_"][id*="_tab3_grid_cell_' + r + '_' + colIdx + '"]');
+                            return el ? el.innerText.trim() : '';
+                        };
                         
                         extractedData.push([
-                            rnum, ispctn, docSeq, unno, imdg, productName, weight, unit, 
-                            entrpsCd, entrpsNm, 
-                            placeNm ? placeNm.innerText.trim() : '', 
-                            tkinDt ? tkinDt.innerText.trim() : '', 
-                            workKind ? workKind.innerText.trim() : '', 
-                            consge ? consge.innerText.trim() : '', 
-                            secong ? secong.innerText.trim() : ''
+                            getCellText(0),  // 순번
+                            getCellText(1),  // 검사증번호
+                            getCellText(2),  // 순번2
+                            getCellText(3),  // UNNO
+                            getCellText(4),  // IMDG
+                            getCellText(5),  // 품명
+                            getCellText(6),  // 중량
+                            getCellText(7),  // 단위
+                            getCellText(8),  // 업체코드
+                            getCellText(10), // 업체명
+                            getCellText(16), // 하역장소
+                            getCellText(17), // 반입일
+                            getCellText(18), // 작업구분
+                            getCellText(19), // 수하인
+                            getCellText(20)  // 송하인
                         ]);
                     }
                     return extractedData;
@@ -222,9 +276,11 @@ def run_real_rpa_crawler():
                     print(f"⚠️ [{ship_name}] 적하일람표 데이터는 없으나 기본 신고서 정보를 수집했습니다.")
 
                 # 5. 목록으로 복귀
-                list_tab_id = "mf_tacMain_contents_M9024_body_tabDgst_tab_tabs0_tabHTML"
-                list_tab = wait.until(EC.element_to_be_clickable((By.ID, list_tab_id)))
-                driver.execute_script("arguments[0].click();", list_tab)
+                list_tab = driver.execute_script("""
+                    return document.querySelector('[id*="mf_tacMain_contents_M9024_"][id*="_tabDgst_tab_tabs0_tabHTML"]');
+                """)
+                if list_tab:
+                    driver.execute_script("arguments[0].click();", list_tab)
                 time.sleep(3)
 
             except Exception as e:
