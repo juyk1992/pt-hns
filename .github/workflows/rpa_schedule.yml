@@ -2,8 +2,7 @@ name: Daily PortMIS RPA Bot Tracker
 
 on:
   schedule:
-    # 💡 매시 17분마다 자동 실행
-    - cron: '17 * * * *'
+    - cron: '17 */4 * * *'
   workflow_dispatch:
 
 # 💡 GitHub Bot이 저장소에 git push 할 수 있도록 쓰기 권한 부여
@@ -16,10 +15,10 @@ jobs:
 
     steps:
     - name: 1. GitHub 저장소 코드 체크아웃
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: 2. 파이썬 환경 세팅
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         cache: 'pip'
@@ -48,5 +47,6 @@ jobs:
         git config --global user.name 'GitHub Action Bot'
         git config --global user.email 'action@github.com'
         git add hns_fully_integrated_report.csv
-        git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 시간별 갱신" || echo "변경사항 없음"
+        git commit -m "🤖 [자동업데이트] 포트미스 HNS 데이터 4시간별 갱신" || echo "변경사항 없음"
+        git pull --rebase origin main || true
         git push
