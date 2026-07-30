@@ -188,7 +188,7 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
 # ==========================================
 # 4. RPA 통합 데이터 로드 (확장 컬럼 반영)
 # ==========================================
-@st.cache_data
+@st.cache_data(ttl=60)
 def load_integrated_hns_data():
     file_path = "hns_fully_integrated_report.csv"
     if os.path.exists(file_path):
