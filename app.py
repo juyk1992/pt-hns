@@ -242,7 +242,7 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
 # ==========================================
 # 4. 항구별 RPA 데이터 로드
 # ==========================================
-@st.cache_data
+@st.cache_data(ttl=10)
 def load_integrated_hns_data(port_code):
     filename_map = {
         "031": "hns_pyeongtaek_report.csv",
