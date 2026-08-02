@@ -259,7 +259,7 @@ def load_integrated_hns_data(port_code):
     return None
 
 # ==========================================
-# 5. 항구별 데이터 렌더링 헬퍼 함수 (선박 필터 제거)
+# 5. 항구별 데이터 렌더링 헬퍼 함수 (선박 선택 필터 박스 포함)
 # ==========================================
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
@@ -276,8 +276,28 @@ def render_port_dashboard(port_name, port_code):
     if df is None or df.empty:
         st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 작동시켜 주세요.")
     else:
+        # 💡 [핵심 추가] 선박 선택 필터 박스 영역
+        ship_column = "선박명(선택)" if "선박명(선택)" in df.columns else df.columns[0]
+        unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
+        
+        filter_col1, filter_col2 = st.columns([2, 1])
+        with filter_col1:
+            selected_ships = st.multiselect(
+                f"🚢 [{port_name}] 조회할 선박을 선택하세요 (다중 선택 가능)",
+                options=unique_ships,
+                default=[],
+                key=f"select_ship_{port_code}",
+                placeholder="선박명을 선택하세요 (미선택 시 전체 표시)"
+            )
+        
+        # 선택 여부에 따른 데이터 필터링
+        if selected_ships:
+            filtered_df = df[df[ship_column].isin(selected_ships)]
+        else:
+            filtered_df = df
+
         with col_metric:
-            st.metric(label="등록된 위험물 신고 건수", value=f"{len(df)} 건")
+            st.metric(label="조회된 위험물 신고 건수", value=f"{len(filtered_df)} 건")
 
         # 전체 반입 신고 목록 Expander
         display_cols = [
@@ -285,15 +305,15 @@ def render_port_dashboard(port_name, port_code):
             '하역업체', '하역기간', '사용장소', '전출항지', 'UNNO', 'IMDG', '품명', '중량', '단위'
         ]
         
-        with st.expander(f"📋 {port_name} 위험물 반입 신고 목록 전체 데이터 보기", expanded=False):
-            st.dataframe(df[[c for c in display_cols if c in df.columns]], use_container_width=True)
+        with st.expander(f"📋 {port_name} 위험물 반입 신고 목록 데이터 보기", expanded=False):
+            st.dataframe(filtered_df[[c for c in display_cols if c in filtered_df.columns]], use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.subheader(f"🚢 {port_name} 선박별 상세 운송 정보 및 지능형 비상 대응")
 
-        # 선박별 카드 Expander UI (선박 선택 필터 없이 전체 표출)
-        for ship in df['선박명(선택)'].unique():
-            ship_data = df[df['선박명(선택)'] == ship]
+        # 필터링된 선박별 카드 Expander UI
+        for ship in filtered_df['선박명(선택)'].unique():
+            ship_data = filtered_df[filtered_df['선박명(선택)'] == ship]
             call_sign = ship_data['호출부호'].iloc[0]
             location = ship_data['사용장소'].iloc[0] if pd.notna(ship_data['사용장소'].iloc[0]) else "장소 미상"
             work_period = ship_data['하역기간'].iloc[0]
