@@ -17,7 +17,7 @@ PORTMIS_ID = os.getenv("PORTMIS_ID", "")
 PORTMIS_PW = os.getenv("PORTMIS_PW", "")
 
 def run_real_rpa_crawler():
-    print("🤖 [페이지네이션 기반 마스터 RPA] 포트미스 자동화 봇 가동...")
+    print("🤖 [정밀 페이지네이션 전수 탐색 RPA] 포트미스 자동화 봇 가동...")
 
     options = webdriver.ChromeOptions()
     options.add_argument('--headless=new')          # 최신 Headless 모드
@@ -183,7 +183,7 @@ def run_real_rpa_crawler():
             print("⏳ 데이터 조회 대기 중 (5초)...")
             time.sleep(5)
 
-            # 9단계: 총 건수 및 총 페이지 수 파싱 (기본 10개씩 보기 유지)
+            # 9단계: 총 건수 및 총 페이지 수 파싱 (기본 10개씩 보기 모드)
             total_count = 0
             for attempt in range(4):
                 total_count = driver.execute_script("""
@@ -205,54 +205,49 @@ def run_real_rpa_crawler():
                 print(f"⚠️ [{port_name}] 조회된 데이터가 없어 다음 항구로 이동합니다.")
                 continue
 
-            total_pages = (total_count + 9) // 10  # 올림 계산 (10개씩)
-            print(f"📄 [{port_name}] 총 {total_pages}개 페이지 수집을 시작합니다.")
+            total_pages = (total_count + 9) // 10  # 올림 계산 (10개씩 기준)
+            print(f"📄 [{port_name}] 총 {total_pages}개 페이지 전수 수집을 시작합니다.")
 
             # ------------------------------------------
-            # 10단계: 페이지별 10개씩 순차 수집 (페이지네이션)
+            # 10단계: 웹스퀘어 정밀 ID 기반 전수 페이지네이션 탐색
             # ------------------------------------------
             for page_idx in range(1, total_pages + 1):
-                print(f"\n==================== [{port_name} | {page_idx} / {total_pages} 페이지 수집] ====================")
+                print(f"\n==================== [{port_name} | {page_idx} / {total_pages} 페이지 탐색] ====================")
 
-                # 페이지 이동 (1페이지가 아닐 경우 해당 페이지 번호 버튼 클릭)
+                # 페이지 이동 (1페이지가 아닐 때 웹스퀘어 정밀 ID로 정확히 클릭)
                 if page_idx > 1:
-                    page_clicked = driver.execute_script(f"""
-                        var pageIdx = {page_idx};
-                        // 웹스퀘어 페이지네이션 컴포넌트 버튼 찾기
-                        var pageBtns = document.querySelectorAll('[id*="sbxRecordCount"] ~ div a, [class*="w2pglist"] a');
-                        for (var b = 0; b < pageBtns.length; b++) {{
-                            if (pageBtns[b].innerText.trim() === pageIdx.toString()) {{
-                                pageBtns[b].click();
-                                return true;
+                    moved = driver.execute_script(f"""
+                        var targetPage = {page_idx};
+                        // 웹스퀘어 고유 ID 구조 탐색
+                        var pageEl = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageList_pglGridView_page_' + targetPage);
+                        
+                        if (pageEl) {{
+                            pageEl.click();
+                            return 'direct';
+                        }} else {{
+                            // 페이지 번호가 보이지 않는 경우 (10페이지 단위 넘어감) -> '다음 페이지(>)' 버튼 클릭
+                            var nextBtn = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageList_pglGridView_next_btn');
+                            if (nextBtn) {{
+                                var aTag = nextBtn.querySelector('a') || nextBtn;
+                                aTag.click();
+                                return 'next_group';
                             }}
-                        }}
-                        // 만약 번호가 직접 안보일 경우 다음 그룹(>) 버튼 클릭 시도
-                        var nextGroupBtn = document.querySelector('[id*="btn_next_page"]') || document.querySelector('.w2pglist_next');
-                        if (nextGroupBtn) {{
-                            nextGroupBtn.click();
-                            return 'next_group';
                         }}
                         return false;
                     """)
-                    time.sleep(3.5) # 페이지전환 대기
+                    time.sleep(3.0)
 
-                    # 10단위 페이지 그룹이 넘어가서 바로 번호가 안 눌렸을 시 재시도
-                    if page_clicked == 'next_group':
+                    # 10단위 그룹 이동(>) 후 목표 번호 다시 클릭
+                    if moved == 'next_group':
                         driver.execute_script(f"""
-                            var pageIdx = {page_idx};
-                            var pageBtns = document.querySelectorAll('[id*="sbxRecordCount"] ~ div a, [class*="w2pglist"] a');
-                            for (var b = 0; b < pageBtns.length; b++) {{
-                                if (pageBtns[b].innerText.trim() === pageIdx.toString()) {{
-                                    pageBtns[b].click();
-                                    break;
-                                }}
-                            }}
+                            var targetPage = {page_idx};
+                            var pageEl = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageList_pglGridView_page_' + targetPage);
+                            if (pageEl) pageEl.click();
                         """)
-                        time.sleep(3.5)
+                        time.sleep(3.0)
 
-                # 현재 페이지에 보이는 10개 행(인덱스 0~9) 순회
+                # 현재 페이지 내의 10개 행 순회 (row 0~9)
                 for row_idx in range(10):
-                    # 해당 행 클릭
                     cell_found = driver.execute_script(f"""
                         var rIdx = {row_idx};
                         var cell = document.querySelector('[id*="_tab1_grid_cell_' + rIdx + '_3"]');
@@ -264,9 +259,9 @@ def run_real_rpa_crawler():
                     """)
 
                     if not cell_found:
-                        break # 더 이상 행이 없으면 해당 페이지 완료
+                        break  # 현재 페이지의 마지막 행에 도달하면 다음 페이지로 이동
 
-                    time.sleep(2.5) # 상세화면 로딩 대기
+                    time.sleep(2.5)  # 상세화면 로딩 대기
 
                     # 기본 신고서 정보 수집
                     report_info = driver.execute_script("""
@@ -288,7 +283,7 @@ def run_real_rpa_crawler():
                         };
                     """)
 
-                    ship_name = report_info['선명'] if report_info['선명'] else f"Page{page_idx}_Row{row_idx}"
+                    ship_name = report_info['선명'] if report_info['선명'] else f"P{page_idx}_R{row_idx+1}"
                     call_sign = report_info['호출부호']
                     use_purpose = report_info['사용목적']
                     transport_type = report_info['운송형태']
@@ -300,7 +295,7 @@ def run_real_rpa_crawler():
                     use_place = report_info['사용장소']
                     prev_port = report_info['전출항지']
 
-                    # 하역종료일자 파싱 및 오늘 이전 데이터 필터링
+                    # 하역종료일 파싱 및 오늘 이전 데이터 필터링 (조기종료 없이 스킵 후 계속 진행)
                     end_date_clean = re.sub(r'[^0-9]', '', haeyuk_end)[:8]
                     
                     if end_date_clean and len(end_date_clean) == 8:
@@ -308,16 +303,17 @@ def run_real_rpa_crawler():
                             end_date_obj = datetime.strptime(end_date_clean, "%Y%m%d").date()
                             if end_date_obj < today_date:
                                 print(f"⏭️ [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} ➔ 하역종료일({end_date_clean})이 오늘 이전이므로 스킵")
+                                # 목록 탭 복귀
                                 driver.execute_script("""
                                     var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
                                     if (listTab) listTab.click();
                                 """)
                                 time.sleep(2.0)
-                                continue
+                                continue  # 스킵 후 다음 선박 탐색 계속 진행!
                         except Exception as dt_err:
-                            print(f"⚠️ 날짜 변환 실패 (계속 진행): {dt_err}")
+                            print(f"⚠️ 날짜 변환 오류 (계속 진행): {dt_err}")
 
-                    print(f"📌 [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} (호출부호: {call_sign}) 수집 진행")
+                    print(f"📌 [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} (호출부호: {call_sign}) 상세 수집 진입")
 
                     # 적하일람표 탭 이동
                     driver.execute_script("""
@@ -326,7 +322,7 @@ def run_real_rpa_crawler():
                     """)
                     time.sleep(2.5)
 
-                    # 적하일람표 파싱
+                    # 적하일람표 데이터 파싱
                     cargo_rows = driver.execute_script("""
                         var extractedData = [];
                         for (var r = 0; r < 50; r++) {
@@ -334,7 +330,7 @@ def run_real_rpa_crawler():
                             if (!cellNo || cellNo.offsetParent === null) break;
                             
                             var getCellText = function(colIdx) {
-                                var el = document.querySelector('[id*="_tab3_grid_cell_' + r + '_' + colIdx + '"]');
+                                var el = document.querySelector('[id*="' + '_tab3_grid_cell_' + r + '_' + colIdx + '"]');
                                 return el ? el.innerText.trim() : '';
                             };
                             
