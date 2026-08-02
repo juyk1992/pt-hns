@@ -8,19 +8,79 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 기본 화면 설정 및 API 키 설정
+# 0. 페이지 설정 & Custom CSS (세련된 UI 적용)
 # ==========================================
-st.set_page_config(page_title="평택항 HNS 안전관리 시스템", page_icon="🚢", layout="wide")
+st.set_page_config(
+    page_title="HNS 통합 실시간 안전관리 및 지능형 대응 시스템",
+    page_icon="🚢",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS 적용
+st.markdown("""
+<style>
+    /* 전체 배경 및 폰트 감성 적용 */
+    .stApp {
+        background-color: #0F172A;
+        color: #F8FAFC;
+    }
+    /* 카드 스타일링 */
+    .css-card {
+        background: #1E293B;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #334155;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        margin-bottom: 15px;
+    }
+    /* 타이틀 및 헤더 */
+    .main-header {
+        font-size: 2.2rem;
+        font-weight: 800;
+        background: linear-gradient(90deg, #38BDF8, #818CF8);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 5px;
+    }
+    .sub-header {
+        color: #94A3B8;
+        font-size: 1.0rem;
+        margin-bottom: 25px;
+    }
+    /* 배지 스타일 */
+    .badge-port {
+        background-color: #0284C7;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.85rem;
+    }
+    .badge-unno {
+        background-color: #E11D48;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-weight: bold;
+    }
+    /* 버튼 스타일 통일 */
+    .stButton>button {
+        border-radius: 8px;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 PUBLIC_API_KEY = st.secrets.get("PUBLIC_API_KEY", "")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # ==========================================
-# 1. HNS 정보집 원본 텍스트 DB 로드 및 검색
+# 1. HNS 정보집 원본 텍스트 DB 로드
 # ==========================================
 @st.cache_data
 def load_full_hns_db():
-    """hns_full_text_database.json 전체 원본 텍스트 데이터 로드"""
     file_path = "hns_full_text_database.json"
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
@@ -30,13 +90,13 @@ def load_full_hns_db():
 full_hns_db = load_full_hns_db()
 
 def find_hns_raw_text(query):
-    """UN번호, 국문명, 영문명, 관용명 기반 로컬 HNS 원본 텍스트 매칭"""
+    """UN번호 또는 물질명으로 로컬 HNS 정보집 텍스트 추출"""
     if not full_hns_db or not query:
         return None
         
     q = query.strip().upper()
     for item in full_hns_db:
-        unno = item.get('unno', '')
+        unno = str(item.get('unno', '')).strip()
         title = item.get('title_header', '').upper()
         synonyms = item.get('synonyms', '').upper()
         
@@ -45,10 +105,10 @@ def find_hns_raw_text(query):
     return None
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (확장 항목 파싱)
+# 2. 공공 API 연동 모듈
 # ==========================================
 def fetch_dgst_info(unno):
-    """해수부 위험물정보 API 상세 항목 파싱"""
+    """해수부 위험물정보 API 상세 파싱"""
     url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
     params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
@@ -73,7 +133,7 @@ def fetch_dgst_info(unno):
     return info
 
 def fetch_chem_safety_info(chem_name):
-    """화학물질안전원 안전관리정보 API 상세 항목 파싱"""
+    """화학물질안전원 안전관리정보 API 상세 파싱"""
     url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
     clean_name = chem_name.split('(')[0].strip()
     params = {'serviceKey': PUBLIC_API_KEY, 'numOfRows': '3', 'pageNo': '1', 'chemKo': clean_name}
@@ -97,15 +157,10 @@ def fetch_chem_safety_info(chem_name):
     return safety_data
 
 # ==========================================
-# 3. Gemini 자연어 매핑 및 풍부화된 AI 요약 모듈
+# 3. Gemini 자연어 매핑 및 고속 AI 요약 모듈
 # ==========================================
 def map_search_query_with_gemini(query_text):
-    raw_match = find_hns_raw_text(query_text)
-    if raw_match:
-        lines = [l.strip() for l in raw_match.split('\n') if l.strip()]
-        title = lines[0] if lines else query_text
-        return {"chem_ko": title, "chem_eng": title, "unno": "0000"}
-
+    """로컬 텍스트 서치를 거치지 않고 Gemini API로 다이렉트 자연어 매핑"""
     if not GEMINI_API_KEY:
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
 
@@ -113,12 +168,21 @@ def map_search_query_with_gemini(query_text):
         client = genai.Client(api_key=GEMINI_API_KEY)
         prompt = f"""
         사용자 입력 검색어: "{query_text}"
-        이 화학물질의 표준 정보를 찾아서 아래 JSON 포맷으로만 답변하세요. 다른 설명 금지:
-        {{"chem_ko": "공식 한국어명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호"}}
+        이 화학물질/관용명/화학식에 해당하는 가장 대표적인 위험물/HNS 화학물질의 표준 정보를 찾아 아래 JSON 포맷으로만 답변하세요. 다른 설명은 금지합니다:
+        {{"chem_ko": "공식 한글명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호"}}
         """
-        response = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
-        text = response.text.replace('```json', '').replace('```', '').strip()
-        return json.loads(text)
+        
+        # 모델 우선순위: gemini-3.6-flash -> gemini-3.5-flash-lite -> gemini-3.5-flash
+        candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
+        for model_id in candidate_models:
+            try:
+                response = client.models.generate_content(model=model_id, contents=prompt)
+                text = response.text.replace('```json', '').replace('```', '').strip()
+                return json.loads(text)
+            except Exception:
+                continue
+
+        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
     except Exception:
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
 
@@ -133,8 +197,8 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         hns_context = f"[해양경찰청 HNS 정보집 원본 문서 정보]\n{hns_raw_text}\n" if hns_raw_text else "[해양경찰청 HNS 정보집 정보]\n매칭 데이터 참조\n"
 
         prompt = f"""
-        당신은 해양경찰청 및 항만 HNS(위험유해물질) 비상대응 상황실 관제관입니다.
-        아래 제공된 [해양경찰청 HNS 정보집 원본]과 [공공 API 확장 수집 데이터]를 종합적으로 완벽하게 분석하여 현장 대응가이드를 작성하세요.
+        당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
+        제공된 데이터들을 종합 분석하여 현장 대응 가이드를 작성하세요.
 
         {hns_context}
 
@@ -149,30 +213,30 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         [화학물질안전원 안전관리정보 API 수집 데이터]
         - CAS 번호: {safety_info.get('casNo', '-')}
         - 일반 증상 및 표적장기: {safety_info.get('symptom', '-')}
-        - 흡입 노출 영향: {safety_info.get('inhale', '-')}
-        - 피부 접촉 영향: {safety_info.get('skin', '-')}
-        - 안구 접촉 영향: {safety_info.get('eyeball', '-')}
-        - 경구 섭취 영향: {safety_info.get('oral', '-')}
+        - 흡입/피부/안구/경구 영향: {safety_info.get('inhale', '-')}, {safety_info.get('skin', '-')}, {safety_info.get('eyeball', '-')}, {safety_info.get('oral', '-')}
 
-        [작성 규칙]
-        1. 가이드 최상단에 상황실에서 3초 만에 파악하고 전파할 수 있는 핵심 요약을 작성하세요.
-        2. 해경 HNS 정보집의 대피거리 수치(M단위), 초기이격거리, 개인보호구 레벨(Level A/C 등)을 우선 적용하세요.
-        3. 아래 구조로 명확히 출력하세요:
+        [작성 핵심 규칙]
+        ★ 최상단 3초 파악용 요약문은 **장황한 설명글을 절대 금지**하며, 현장 요원이 보고 1초만에 지시/전파할 수 있도록 **핵심 키워드, 수치(M단위), 구체적 단어 위주로 극도로 간결하게 표 형태로 작성**하세요.
 
-        ### 🚨 [상황실 전파 및 초동대응 핵심 요약] (3초 파악용)
-        * **사고물질 및 주요위험:** (IMDG 등급, 화재/폭발/독성가스/물반응성 위험성)
-        * **초기 이격 및 대피거리:** (HNS 정보집 기준 화재대피거리 및 해상유출 이격거리/방호활동거리 M단위 정확히 명시)
-        * **필수 개인보호구 및 장비:** (레벨 A/C 등급, 내화학복, 공기호흡기, 복합가스탐지기 등)
-        * **초동 조치 핵심:** (풍상 위치, 오염원 접근 주의, 방제/소화 약제 수칙)
+        --- 출력 형식을 엄격히 준수하세요 ---
+
+        ### 🚨 [상황실 초동대응 3초 핵심요약]
+        | 구분 | 핵심 대응 내용 (초간결 지시용) |
+        |---|---|
+        | **사고물질/위험성** | [IMDG 등급] + [핵심위험: 예) 인화성/독성가스/수반응성] |
+        | **대피/이격거리** | **초기이격:** OOm / **화재대피:** OOm / **유출방호:** OOm (HNS 정보집 수치 필수) |
+        | **필수 보호구** | **[Level A/C]** + [공기호흡기/내화학복/복합가스탐지기 등 필수장비] |
+        | **초동 행동수칙** | **[풍상위치]** + [핵심금지사항 및 소화약제 요약] |
 
         ---
-        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (EmS/적재방법 포함)
+        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (EmS/적재방법)
         ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령
-        ### 3. ⛔ 절대 금지 행동 (금기 사항 - 직사주수 금지, 물 접촉 금지 등)
-        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구)
+        ### 3. ⛔ 절대 금지 행동 (금기 사항 - 물 접촉 금지, 직사주수 금지 등)
+        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
-        candidate_models = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-2.5-flash']
+        # 모델 우선순위적용: gemini-3.6-flash -> gemini-3.5-flash-lite -> gemini-3.5-flash
+        candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
         for model_id in candidate_models:
             try:
                 response = client.models.generate_content(model=model_id, contents=prompt)
@@ -186,11 +250,16 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. RPA 통합 데이터 로드 (확장 컬럼 반영)
+# 4. 항구별 RPA 데이터 로드 (평택항 / 대산항)
 # ==========================================
-@st.cache_data(ttl=60)
-def load_integrated_hns_data():
-    file_path = "hns_fully_integrated_report.csv"
+@st.cache_data
+def load_integrated_hns_data(port_code):
+    filename_map = {
+        "031": "pyeongtaek_hns_report.csv",
+        "300": "daesan_hns_report.csv"
+    }
+    
+    file_path = filename_map.get(port_code, "pyeongtaek_hns_report.csv")
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
         df.columns = df.columns.str.strip()
@@ -202,69 +271,93 @@ def load_integrated_hns_data():
 # ==========================================
 # 5. Streamlit UI 화면 구성
 # ==========================================
-st.title("🚨 평택항 HNS 실시간 안전관리 및 지능형 대응 시스템")
-st.markdown("**포트미스 RPA + 공공 API + 해경 HNS 정보집 DB + Gemini AI 통합 솔루션**")
+
+# 헤더 영역
+st.markdown('<div class="main-header">🚢 HNS 실시간 안전관리 & 지능형 비상대응 솔루션</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">포트미스 RPA + 공공 API + 해경 HNS 정보집 DB + Gemini AI 지능형 관제 시스템</div>', unsafe_allow_html=True)
 
 kst_now = datetime.utcnow() + timedelta(hours=9)
 today_str = kst_now.strftime("%Y-%m-%d")
 
-# 1) 메인 검색창 (자연어/화학식 실시간 매핑)
-st.markdown("### 🔎 HNS 물질 자연어/화학식 실시간 통합 검색")
-search_input = st.text_input("화학물질명, 화학식, 관용명을 입력하세요 (예: NaOH, 수산화나트륨, 가성소다, LNG)", key="main_search_box")
+# 사이드바 - 항구 선택 및 필터
+st.sidebar.markdown("## ⚓ 항구 선택")
+selected_port = st.sidebar.radio(
+    "관리 대상 항구를 선택하세요",
+    ["평택항 (청코드: 031)", "대산항 (청코드: 300)"],
+    index=0
+)
+
+port_code = "031" if "평택항" in selected_port else "300"
+port_name = "평택항" if port_code == "031" else "대산항"
+
+# 1) 메인 자연어 매핑 검색창
+st.markdown("### 🔎 HNS 화학물질 AI 스마트 매핑 검색")
+search_input = st.text_input("화학물질명, 화학식, 관용명을 입력하세요 (예: H2SO4, 황산, 가성소다, LNG, 수산화나트륨)", key="main_search_box")
 
 if search_input:
-    with st.spinner("HNS DB 및 AI 분석 중..."):
+    with st.spinner("Gemini AI가 화학물질을 정밀 분석 중..."):
         mapped_result = map_search_query_with_gemini(search_input)
         mapped_ko = mapped_result.get("chem_ko", search_input)
         mapped_eng = mapped_result.get("chem_eng", search_input)
         mapped_unno = str(mapped_result.get("unno", "0000")).zfill(4)
         
-        st.success(f"🔍 **AI/DB 매핑 완료:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}`")
-        
-        if st.button("🤖 검색 물질 AI 대응 가이드 생성", key="btn_custom_search"):
-            st.session_state['active_chem'] = mapped_ko
-            st.session_state['active_unno'] = mapped_unno
-            st.session_state['active_ship'] = f"자유 검색 ('{search_input}')"
+        c1, c2 = st.columns([4, 1])
+        with c1:
+            st.info(f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}`")
+        with c2:
+            if st.button("🤖 AI 가이드 생성", key="btn_custom_search", use_container_width=True):
+                st.session_state['active_chem'] = mapped_ko
+                st.session_state['active_unno'] = mapped_unno
+                st.session_state['active_ship'] = f"자유 검색 ('{search_input}')"
 
 st.divider()
 
-# 2) 반입 현황 데이터 표출 (기준일자 명시)
-df = load_integrated_hns_data()
-st.subheader(f"📊 평택항 위험물 반입 현황 (조회 기준일자: {today_str})")
+# 2) 반입 현황 데이터 표출
+df = load_integrated_hns_data(port_code)
+
+col_title, col_metric = st.columns([3, 1])
+with col_title:
+    st.subheader(f"📊 {port_name} 위험물 반입 현황")
+    st.caption(f"조회 기준일자: {today_str}")
 
 if df is None or df.empty:
-    st.warning(f"⚠️ {today_str} 기준 데이터가 없습니다. RPA 봇을 돌려주세요!")
+    st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 작동시켜 주세요.")
 else:
-    st.sidebar.header("🔍 검색 및 필터")
-    selected_ship = st.sidebar.selectbox("선박 선택", ["전체보기"] + list(df['선박명(선택)'].unique()))
+    # 필터링
+    ship_list = ["전체보기"] + list(df['선박명(선택)'].unique())
+    selected_ship = st.sidebar.selectbox("선박 선택 필터", ship_list)
     
     filtered_df = df[df['선박명(선택)'] == selected_ship] if selected_ship != "전체보기" else df
 
-    st.write(f"총 **{len(filtered_df)}건**의 위험물 반입 신고가 등록되어 있습니다.")
-    
-    # 💡 신규 확장 컬럼 반영 그리드 테이블 표출
+    with col_metric:
+        st.metric(label="등록된 위험물 신고 건수", value=f"{len(filtered_df)} 건")
+
+    # 현황 테이블 표출
     display_cols = [
         '선박명(선택)', '호출부호', '사용목적', '운송형태', '화물명', 
         '하역업체', '하역기간', '사용장소', '전출항지', 'UNNO', 'IMDG', '품명', '중량', '단위'
     ]
-    st.dataframe(filtered_df[[c for c in display_cols if c in filtered_df.columns]], use_container_width=True)
+    
+    with st.expander(f"📋 {port_name} 위험물 반입 신고 목록 전체 데이터 보기", expanded=False):
+        st.dataframe(filtered_df[[c for c in display_cols if c in filtered_df.columns]], use_container_width=True)
 
-    st.divider()
-    st.subheader("🚢 선박별 상세 운송 정보 및 지능형 비상 대응")
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader(f"🚢 {port_name} 선박별 상세 운송 정보 및 지능형 비상 대응")
 
+    # 선박별 카드 UI
     for ship in filtered_df['선박명(선택)'].unique():
         ship_data = filtered_df[filtered_df['선박명(선택)'] == ship]
         call_sign = ship_data['호출부호'].iloc[0]
-        location = ship_data['사용장소'].iloc[0] if pd.notna(ship_data['사용장소'].iloc[0]) else "지정 장소 미상"
+        location = ship_data['사용장소'].iloc[0] if pd.notna(ship_data['사용장소'].iloc[0]) else "장소 미상"
         work_period = ship_data['하역기간'].iloc[0]
         use_purpose = ship_data['사용목적'].iloc[0] if '사용목적' in ship_data.columns else "-"
         transport_type = ship_data['운송형태'].iloc[0] if '운송형태' in ship_data.columns else "-"
         prev_port = ship_data['전출항지'].iloc[0] if '전출항지' in ship_data.columns else "-"
         
         with st.expander(f"⚓ [{ship}] (호출부호: {call_sign}) ｜ 하역장소: {location} ｜ 기간: {work_period}"):
-            st.markdown(f"**🏢 하역업체:** {ship_data['하역업체'].iloc[0]} ｜ **사용목적:** {use_purpose} ｜ **운송형태:** {transport_type} ｜ **전출항지:** {prev_port}")
+            st.markdown(f"**🏢 하역업체:** {ship_data['하역업체'].iloc[0]} &nbsp;\|&nbsp; **사용목적:** {use_purpose} &nbsp;\|&nbsp; **운송형태:** {transport_type} &nbsp;\|&nbsp; **전출항지:** {prev_port}")
             st.markdown("---")
-            st.markdown("#### 📦 적재된 위험물 목록")
+            st.markdown("##### 📦 적재 위험물 목록")
             
             for idx, row in ship_data.iterrows():
                 unno = str(row['UNNO']).zfill(4) if pd.notna(row['UNNO']) else "0000"
@@ -276,27 +369,28 @@ else:
                 if unno == '0000' or not unno.strip():
                     continue
                 
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"🔹 **UN NO:** `{unno}` ｜ **IMDG:** `{imdg}` ｜ **품명:** **{chem_name}** ｜ **수량:** {weight} {unit}")
-                with col2:
-                    button_key = f"btn_{ship}_{idx}_{unno}"
-                    if st.button("🤖 AI 대응 가이드 생성", key=button_key):
+                c_info, c_btn = st.columns([4, 1])
+                with c_info:
+                    st.markdown(f"• <span class='badge-unno'>UN {unno}</span> &nbsp; **{chem_name}** &nbsp; (IMDG: {imdg} / 수량: {weight} {unit})", unsafe_allow_html=True)
+                with c_btn:
+                    button_key = f"btn_{port_code}_{ship}_{idx}_{unno}"
+                    if st.button("🤖 AI 가이드 생성", key=button_key, use_container_width=True):
                         st.session_state['active_chem'] = chem_name
                         st.session_state['active_unno'] = unno
-                        st.session_state['active_ship'] = ship
+                        st.session_state['active_ship'] = f"[{port_name}] {ship}"
 
 # ==========================================
-# 6. AI 대응 가이드 출력 영역
+# 6. AI 대응 가이드 출력 모달/컨테이너
 # ==========================================
 if 'active_chem' in st.session_state:
     st.divider()
     chem = st.session_state['active_chem']
     unno = st.session_state['active_unno']
+    ship_info = st.session_state['active_ship']
     
-    st.error(f"⚡ [지능형 비상대응 가이드] 대상 선박: {st.session_state['active_ship']} ｜ 물질: {chem} (UN NO: {unno})")
+    st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno})")
     
-    with st.spinner('해수부 API + 화학물질안전원 API + 해경 HNS 정보집 DB 기반 AI 가이드 생성 중...'):
+    with st.spinner('공공 API + 해경 HNS 정보집 + Gemini AI 가이드 생성 중...'):
         dgst_info = fetch_dgst_info(unno)
         safety_info = fetch_chem_safety_info(chem)
         
@@ -304,7 +398,7 @@ if 'active_chem' in st.session_state:
         
     st.markdown(ai_summary)
     
-    if st.button("🔄 가이드 닫기"):
+    if st.button("❌ 가이드 창 닫기", use_container_width=True):
         del st.session_state['active_chem']
         del st.session_state['active_unno']
         del st.session_state['active_ship']
