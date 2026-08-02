@@ -337,7 +337,7 @@ st.markdown('<div class="sub-header">포트미스 + 공공 API + 해경 HNS DB +
 # ------------------------------------------
 # 🔥 [통합] HNS 화학물질 AI 스마트 매핑 검색창 (항 구분 없음)
 # ------------------------------------------
-st.markdown("### 🔎 HNS 화학물질 AI 스마트 매핑 검색 (전체 통합)")
+st.markdown("### 🔎 HNS 화학물질 AI 스마트 매핑 검색")
 search_input = st.text_input(
     "화학물질명, 화학식, 관용명을 입력하세요 (예: H2SO4, 황산, 가성소다, LNG, 수산화나트륨)", 
     key="global_search_box"
