@@ -11,7 +11,7 @@ from google import genai
 # 0. 페이지 설정 & Custom CSS (세련된 UI 적용)
 # ==========================================
 st.set_page_config(
-    page_title="HNS 통합 실시간 안전관리 및 지능형 대응 시스템",
+    page_title="평택해양경찰서 HNS AI 대응 시스템",
     page_icon="🚢",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -255,11 +255,11 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
 @st.cache_data
 def load_integrated_hns_data(port_code):
     filename_map = {
-        "031": "pyeongtaek_hns_report.csv",
-        "300": "daesan_hns_report.csv"
+        "031": "hns_pyeongtaek_report.csv",
+        "300": "hns_daesan_report.csv"
     }
     
-    file_path = filename_map.get(port_code, "pyeongtaek_hns_report.csv")
+    file_path = filename_map.get(port_code, "hns_pyeongtaek_report.csv")
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
         df.columns = df.columns.str.strip()
@@ -273,8 +273,8 @@ def load_integrated_hns_data(port_code):
 # ==========================================
 
 # 헤더 영역
-st.markdown('<div class="main-header">🚢 HNS 실시간 안전관리 & 지능형 비상대응 솔루션</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">포트미스 RPA + 공공 API + 해경 HNS 정보집 DB + Gemini AI 지능형 관제 시스템</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🚢 평택해양경찰서 HNS 실시간 안전관리 & AI 비상대응 솔루션</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">포트미스 + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>', unsafe_allow_html=True)
 
 kst_now = datetime.utcnow() + timedelta(hours=9)
 today_str = kst_now.strftime("%Y-%m-%d")
