@@ -3,10 +3,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.service import Service
 from datetime import datetime, timedelta
 import pandas as pd
 import time
 import os
+import re
 
 # ==========================================
 # ⚙️ 계정 설정 영역
@@ -16,30 +18,44 @@ PORTMIS_PW = os.getenv("PORTMIS_PW", "")
 
 def run_real_rpa_crawler():
     print("🤖 [종합 데이터 통합 마스터 RPA] 포트미스 자동화 봇 가동...")
-    
+
     options = webdriver.ChromeOptions()
-    options.add_argument('--headless')          # 화면 없이 실행
+    options.add_argument('--headless=new')          # 최신 Headless 모드
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
     options.add_argument('--window-size=1920,1080')
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
+    # 1. 크롬 브라우저 바이너리 지정
     chrome_binaries = ["/usr/bin/chromium-browser", "/usr/bin/google-chrome", "/usr/bin/chromium"]
     for bin_path in chrome_binaries:
         if os.path.exists(bin_path):
             options.binary_location = bin_path
             break
 
-    driver = webdriver.Chrome(options=options)
+    # 2. OCI/Linux ARM64 환경용 ChromeDriver Service 지정
+    chromedriver_paths = ["/usr/bin/chromium-chromedriver", "/usr/bin/chromedriver"]
+    chromedriver_bin = None
+    for driver_path in chromedriver_paths:
+        if os.path.exists(driver_path):
+            chromedriver_bin = driver_path
+            break
+
+    if chromedriver_bin:
+        service = Service(executable_path=chromedriver_bin)
+        driver = webdriver.Chrome(service=service, options=options)
+    else:
+        driver = webdriver.Chrome(options=options)
+
     wait = WebDriverWait(driver, 20)
-    
+
     # 📌 수집 대상 항구 정의 (평택항: 031, 대산항: 300)
     ports_to_collect = [
         {"name": "평택항", "code": "031", "filename": "hns_pyeongtaek_report.csv"},
         {"name": "대산항", "code": "300", "filename": "hns_daesan_report.csv"}
     ]
-    
+
     try:
         # ------------------------------------------
         # 1단계 ~ 5단계: 로그인 및 페이지 진입 (1회만 수행)
@@ -105,11 +121,11 @@ def run_real_rpa_crawler():
             port_name = port["name"]
             port_code = port["code"]
             output_filename = port["filename"]
-            
+
             print(f"\n==========================================")
             print(f"🚢 [{port_name} (청코드: {port_code})] 데이터 수집 프로세스 개시")
             print(f"==========================================")
-            
+
             port_integrated_data = [] # 항구별 데이터를 담을 독립 리스트
 
             # ------------------------------------------
@@ -127,15 +143,17 @@ def run_real_rpa_crawler():
                     codeInput.blur();
                 }}
             """)
-            time.sleep(2)
+            time.sleep(3)
 
             # ------------------------------------------
-            # 7단계: 오늘 날짜 자동 입력
+            # 7단계: 신고일자 자동 입력 (시작일: 7일 전 / 종료일: 오늘)
             # ------------------------------------------
             kst_now = datetime.utcnow() + timedelta(hours=9)
+            today_date = kst_now.date()
             today_str = kst_now.strftime("%Y%m%d")
-            
-            print(f"👉 [7단계] 신고일자 시작일/종료일 오늘 날짜({today_str}) 설정...")
+            from_str = (kst_now - timedelta(days=7)).strftime("%Y%m%d")  # 🔥 일주일 전 날짜
+
+            print(f"👉 [7단계] 신고일자 설정: 시작일({from_str}) ~ 종료일({today_str})...")
             driver.execute_script(f"""
                 var fromInput = document.getElementById('mf_tacMain_contents_M9024_0_body_calfromReqstDt_input') || 
                                 document.getElementById('mf_tacMain_contents_M9024_body_calfromReqstDt_input') ||
@@ -146,7 +164,7 @@ def run_real_rpa_crawler():
                 
                 if (fromInput) {{
                     fromInput.focus();
-                    fromInput.value = '{today_str}';
+                    fromInput.value = '{from_str}';
                     fromInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
                     fromInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
                     fromInput.blur();
@@ -159,7 +177,7 @@ def run_real_rpa_crawler():
                     toInput.blur();
                 }}
             """)
-            time.sleep(2)
+            time.sleep(3)
 
             # ------------------------------------------
             # 8단계: 메인 검색 버튼 클릭
@@ -172,13 +190,13 @@ def run_real_rpa_crawler():
                     if (anchor) { anchor.click(); } else { searchBtn.click(); }
                 }
             """)
-            print("⏳ 데이터 1차 조회 대기 중 (5초)...")
-            time.sleep(5)
+            print("⏳ 데이터 1차 조회 대기 중 (7초)...")
+            time.sleep(7)
 
             # ------------------------------------------
-            # 9단계: '100개씩 보기' 선택 및 적용
+            # 9단계: '500개씩 보기' 선택 및 적용 (🔥 상향 조정)
             # ------------------------------------------
-            print("👉 [9단계] 목록 표시 수 '100개씩 보기' 변경...")
+            print("👉 [9단계] 목록 표시 수 '500개씩 보기' 변경...")
             try:
                 select_element = driver.execute_script("""
                     return document.getElementById('mf_tacMain_contents_M9024_0_body_udcGridPageView_sbxRecordCount_input_0') ||
@@ -187,42 +205,48 @@ def run_real_rpa_crawler():
                 """)
                 if select_element:
                     select_box = Select(select_element)
-                    select_box.select_by_visible_text("100개씩 보기")
+                    # 500개씩 보기 선택 (옵션 문구 매칭)
+                    select_box.select_by_visible_text("500개씩 보기")
                     driver.execute_script("""
                         arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
                     """, select_element)
-                    print("✅ '100개씩 보기' 적용 완료! 대기 중 (5초)...")
-                    time.sleep(5)
+                    print("✅ '500개씩 보기' 적용 완료! 대기 중 (7초)...")
+                    time.sleep(7)
             except Exception as sel_err:
-                print(f"⚠️ '100개씩 보기' 변경 중 예외 발생: {sel_err}")
+                print(f"⚠️ '500개씩 보기' 변경 중 예외 발생: {sel_err}")
 
             # ------------------------------------------
             # 10단계: 건수 파싱 및 전수 수집
             # ------------------------------------------
             print(f"👉 [10단계] {port_name} 총 건수 파싱 및 수집 시작...")
-            
-            total_count = driver.execute_script("""
-                var countSpan = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_txtTotalDataCount');
-                if (countSpan) {
-                    var text = countSpan.innerText;
-                    var match = text.match(/\\d+/);
-                    if (match) { return parseInt(match[0]); }
-                }
-                var maxRnum = 0;
-                for (var i = 0; i < 100; i++) {
-                    var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
-                    if (cellNo) {
-                        var val = parseInt(cellNo.innerText.trim()) || 0;
-                        if (val > maxRnum) maxRnum = val;
+
+            total_count = 0
+            for attempt in range(4):
+                total_count = driver.execute_script("""
+                    var countSpan = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_txtTotalDataCount');
+                    if (countSpan) {
+                        var text = countSpan.innerText;
+                        var match = text.match(/\\d+/);
+                        if (match) { return parseInt(match[0]); }
                     }
-                }
-                return maxRnum > 0 ? maxRnum : 0;
-            """)
-            
+                    var maxRnum = 0;
+                    for (var i = 0; i < 500; i++) {
+                        var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
+                        if (cellNo) {
+                            var val = parseInt(cellNo.innerText.trim()) || 0;
+                            if (val > maxRnum) maxRnum = val;
+                        }
+                    }
+                    return maxRnum > 0 ? maxRnum : 0;
+                """)
+                if total_count > 0:
+                    break
+                time.sleep(2)
+
             print(f"📊 [{port_name}] 실시간 파싱된 총 데이터 건수: {total_count}건.")
 
             if total_count == 0:
-                print(f"⚠️ [{port_name}] 조회된 데이터가 없어 다음 항구로 이동합니다.")
+                print(f"⚠️ [{port_name}] 최근 7일간 조회된 데이터가 없어 다음 항구로 이동합니다.")
                 continue
 
             for target_rnum in range(total_count, 0, -1):
@@ -235,12 +259,12 @@ def run_real_rpa_crawler():
                         
                         if (scrollDiv) {{ scrollDiv.scrollTop = 0; }}
                         
-                        for (var s = 0; s < 40; s++) {{
+                        for (var s = 0; s < 50; s++) {{
                             if (scrollDiv) {{ 
-                                scrollDiv.scrollTop = s * 25; 
+                                scrollDiv.scrollTop = s * 30; 
                             }}
                             
-                            for (var i = 0; i < 100; i++) {{
+                            for (var i = 0; i < 500; i++) {{
                                 var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
                                 if (cellNo && parseInt(cellNo.innerText.trim()) === targetRnum) {{
                                     var targetCell = document.querySelector('[id*="_tab1_grid_cell_' + i + '_3"]');
@@ -263,10 +287,10 @@ def run_real_rpa_crawler():
                             
                             if (scrollDiv) {{ scrollDiv.scrollTop = scrollDiv.scrollHeight; }}
                             
-                            for (var s = 30; s >= 0; s--) {{
+                            for (var s = 40; s >= 0; s--) {{
                                 if (scrollDiv) {{ scrollDiv.scrollTop = s * 30; }}
                                 
-                                for (var i = 0; i < 100; i++) {{
+                                for (var i = 0; i < 500; i++) {{
                                     var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
                                     if (cellNo && parseInt(cellNo.innerText.trim()) === targetRnum) {{
                                         var targetCell = document.querySelector('[id*="_tab1_grid_cell_' + i + '_3"]');
@@ -313,11 +337,31 @@ def run_real_rpa_crawler():
                     transport_type = report_info['운송형태']
                     cargo_name = report_info['화물명']
                     haeyuk_corp = report_info['하역업체']
-                    haeyuk_period = report_info['하역시작'] + ' ~ ' + report_info['하역종료']
+                    haeyuk_start = report_info['하역시작']
+                    haeyuk_end = report_info['하역종료']
+                    haeyuk_period = haeyuk_start + ' ~ ' + haeyuk_end
                     use_place = report_info['사용장소']
                     prev_port = report_info['전출항지']
 
-                    print(f"📌 [{port_name} | 순번 {target_rnum}] 선명: {ship_name} (호출부호: {call_sign}) 상세 진입")
+                    # 🔥 [핵심 추가] 하역종료일자 파싱 및 오늘 날짜 이전 스킵 처리
+                    end_date_clean = re.sub(r'[^0-9]', '', haeyuk_end)[:8]  # '2026-08-02 14:00' -> '20260802'
+                    
+                    if end_date_clean and len(end_date_clean) == 8:
+                        try:
+                            end_date_obj = datetime.strptime(end_date_clean, "%Y%m%d").date()
+                            if end_date_obj < today_date:
+                                print(f"⏭️ [{port_name} | 순번 {target_rnum}] 선명: {ship_name} ➔ 하역종료일({end_date_clean})이 오늘({today_str}) 이전이므로 스킵합니다.")
+                                # 목록 탭으로 복귀 후 스킵
+                                driver.execute_script("""
+                                    var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
+                                    if (listTab) listTab.click();
+                                """)
+                                time.sleep(2.0)
+                                continue
+                        except Exception as dt_err:
+                            print(f"⚠️ 날짜 변환 중 오류 (진행 계속): {dt_err}")
+
+                    print(f"📌 [{port_name} | 순번 {target_rnum}] 선명: {ship_name} (호출부호: {call_sign}) 상세 수집 진입")
 
                     # 적하일람표 탭 이동
                     driver.execute_script("""
@@ -382,7 +426,7 @@ def run_real_rpa_crawler():
                     continue
 
             # ------------------------------------------
-            # 11단계: 항구별 저장 (Loop 완료 시 저장)
+            # 11단계: 항구별 저장
             # ------------------------------------------
             if port_integrated_data:
                 columns = [
@@ -395,7 +439,7 @@ def run_real_rpa_crawler():
                 df.to_csv(output_filename, index=False, encoding='utf-8-sig')
                 print(f"\n🎉 [{port_name} 완료] 총 {len(port_integrated_data)}건의 데이터가 '{output_filename}' 파일로 저장되었습니다!")
             else:
-                print(f"\n⚠️ [{port_name}] 수집된 데이터가 없습니다.")
+                print(f"\n⚠️ [{port_name}] 수집 대상(현재 하역 진행 중) 데이터가 없습니다.")
 
     except Exception as e:
         print(f"❌ [전체 RPA 에러 발생]: {e}")
