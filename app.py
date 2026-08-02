@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Custom CSS (세련된 UI 적용)
+# 0. 페이지 설정 & Custom CSS
 # ==========================================
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
