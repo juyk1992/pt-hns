@@ -42,11 +42,11 @@ jobs:
       run: |
         python rpa_bot.py
 
-    - name: 6. 갱신된 CSV 파일 GitHub 저장소에 자동으로 Commit & Push
+    - name: 6. 갱신된 CSV 파일(평택항, 대산항) GitHub 저장소에 자동으로 Commit & Push
       run: |
         git config --global user.name 'GitHub Action Bot'
         git config --global user.email 'action@github.com'
-        git add hns_fully_integrated_report.csv
-        git commit -m "🤖 [포트미스 자동동기화] 평택항 HNS 위험물반입현황" || echo "변경사항 없음"
+        git add pyeongtaek_hns_report.csv daesan_hns_report.csv
+        git commit -m "🤖 [포트미스 자동동기화] 평택항/대산항 HNS 위험물반입현황 갱신" || echo "변경사항 없음"
         git pull --rebase origin main || true
         git push
