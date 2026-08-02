@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
 from datetime import datetime, timedelta
 import pandas as pd
 import time
@@ -33,11 +34,15 @@ def run_real_rpa_crawler():
     driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, 20)
     
-    all_integrated_data = [] # 모든 선박의 신고서 + 적하일람표 데이터를 모을 리스트
+    # 📌 수집 대상 항구 정의 (평택항: 031, 대산항: 300)
+    ports_to_collect = [
+        {"name": "평택항", "code": "031", "filename": "hns_pyeongtaek_report.csv"},
+        {"name": "대산항", "code": "300", "filename": "hns_daesan_report.csv"}
+    ]
     
     try:
         # ------------------------------------------
-        # 1단계 ~ 5단계: 로그인 및 페이지 진입
+        # 1단계 ~ 5단계: 로그인 및 페이지 진입 (1회만 수행)
         # ------------------------------------------
         print("👉 [1단계] 인트로 페이지 접속 중...")
         driver.get("https://new.portmis.go.kr/portmis/websquare/websquare.jsp?w2xPath=/portmis/w2/main/intro.xml")
@@ -83,175 +88,157 @@ def run_real_rpa_crawler():
         driver.get(target_url)
         time.sleep(5)
 
-        # ------------------------------------------
-        # 💡 최소한의 ESC 팝업 닫기 방어 로직
-        # ------------------------------------------
+        # 💡 ESC 키를 통한 안전 팝업 닫기
         print("👉 [안전 장치] 팝업 닫기를 위한 ESC 키 입력 중...")
-        time.sleep(3) # 팝업 로딩 대기
-        
-        from selenium.webdriver.common.keys import Keys
-
+        time.sleep(3)
         try:
-            # 브라우저 body에 ESC 키 신호 전송
             driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
             print("✅ ESC 키 신호 전송 완료.")
-            time.sleep(2) # 팝업 닫히는 대기 시간
+            time.sleep(2)
         except Exception as e:
             print(f"⚠️ ESC 전송 중 예외 발생: {e}")
 
         # ------------------------------------------
-        # 6단계: 청코드 '031' 입력
+        # 🔄 항구별 순회 수집 시작 (평택항 -> 대산항)
         # ------------------------------------------
-        print("👉 [6단계] 청코드 '031' 입력 및 갱신 이벤트 실행...")
-        driver.execute_script("""
-            var codeInput = document.getElementById('mf_tacMain_contents_M9024_body_prtAgCd_cmmCd') || 
-                            document.querySelector('[id*="prtAgCd_cmmCd"]');
-            if (codeInput) {
-                codeInput.focus();
-                codeInput.value = '031';
-                codeInput.dispatchEvent(new Event('input', { bubbles: true }));
-                codeInput.dispatchEvent(new Event('change', { bubbles: true }));
-                codeInput.blur();
-            }
-        """)
-        time.sleep(2)
-
-        # ------------------------------------------
-        # 7단계: KST 기준 오늘 날짜 자동 입력 및 blur()
-        # ------------------------------------------
-        kst_now = datetime.utcnow() + timedelta(hours=9)
-        today_str = kst_now.strftime("%Y%m%d")
-        
-        print(f"👉 [7단계] 신고일자 시작일/종료일 오늘 날짜({today_str}) 설정 및 blur() 실행...")
-        driver.execute_script(f"""
-            var fromInput = document.getElementById('mf_tacMain_contents_M9024_0_body_calfromReqstDt_input') || 
-                            document.getElementById('mf_tacMain_contents_M9024_body_calfromReqstDt_input') ||
-                            document.querySelector('[id*="calfromReqstDt_input"]');
-            var toInput = document.getElementById('mf_tacMain_contents_M9024_0_body_caltoReqstDt_input') || 
-                          document.getElementById('mf_tacMain_contents_M9024_body_caltoReqstDt_input') ||
-                          document.querySelector('[id*="caltoReqstDt_input"]');
+        for port in ports_to_collect:
+            port_name = port["name"]
+            port_code = port["code"]
+            output_filename = port["filename"]
             
-            if (fromInput) {{
-                fromInput.focus();
-                fromInput.value = '{today_str}';
-                fromInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                fromInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                fromInput.blur();
-            }}
-            if (toInput) {{
-                toInput.focus();
-                toInput.value = '{today_str}';
-                toInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                toInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                toInput.blur();
-            }}
-        """)
-        time.sleep(2)
+            print(f"\n==========================================")
+            print(f"🚢 [{port_name} (청코드: {port_code})] 데이터 수집 프로세스 개시")
+            print(f"==========================================")
+            
+            port_integrated_data = [] # 항구별 데이터를 담을 독립 리스트
 
-        # ------------------------------------------
-        # 8단계: 메인 검색 버튼 정밀 클릭
-        # ------------------------------------------
-        print("👉 [8단계] 우측 상단 메인 [검색] 버튼 정밀 클릭 중...")
-        driver.execute_script("""
-            var searchBtn = document.getElementById('mf_tacMain_contents_M9024_body_udcSearch_btnSearch');
-            if (searchBtn) {
-                var anchor = searchBtn.querySelector('a');
-                if (anchor) { anchor.click(); } else { searchBtn.click(); }
-            }
-        """)
-        print("⏳ 데이터 1차 조회 대기 중 (5초)...")
-        time.sleep(5)
-
-        # ------------------------------------------
-        # 9단계: '100개씩 보기' 선택 및 재조회
-        # ------------------------------------------
-        print("👉 [9단계] 목록 표시 수 '100개씩 보기'로 변경 중...")
-        try:
-            select_element = driver.execute_script("""
-                return document.getElementById('mf_tacMain_contents_M9024_0_body_udcGridPageView_sbxRecordCount_input_0') ||
-                       document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_sbxRecordCount_input_0') ||
-                       document.querySelector('[id*="sbxRecordCount_input_0"]');
+            # ------------------------------------------
+            # 6단계: 청코드 입력
+            # ------------------------------------------
+            print(f"👉 [6단계] 청코드 '{port_code}'({port_name}) 입력 및 갱신 이벤트 실행...")
+            driver.execute_script(f"""
+                var codeInput = document.getElementById('mf_tacMain_contents_M9024_body_prtAgCd_cmmCd') || 
+                                document.querySelector('[id*="prtAgCd_cmmCd"]');
+                if (codeInput) {{
+                    codeInput.focus();
+                    codeInput.value = '{port_code}';
+                    codeInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    codeInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    codeInput.blur();
+                }}
             """)
-            if select_element:
-                select_box = Select(select_element)
-                select_box.select_by_visible_text("100개씩 보기")
-                driver.execute_script("""
-                    arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                """, select_element)
-                print("✅ '100개씩 보기' 적용 완료! 대기 중 (5초)...")
-                time.sleep(5)
-        except Exception as sel_err:
-            print(f"⚠️ '100개씩 보기' 변경 중 예외 발생: {sel_err}")
+            time.sleep(2)
 
-        # ------------------------------------------
-        # 10단계: 스크롤 미세 정지 딜레이가 포함된 안정형 전수 수집
-        # ------------------------------------------
-        print("👉 [10단계] 화면 동적 총 건수 파싱 및 전수 수집 시작...")
-        
-        total_count = driver.execute_script("""
-            var countSpan = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_txtTotalDataCount');
-            if (countSpan) {
-                var text = countSpan.innerText;
-                var match = text.match(/\\d+/);
-                if (match) { return parseInt(match[0]); }
-            }
-            var maxRnum = 0;
-            for (var i = 0; i < 100; i++) {
-                var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
-                if (cellNo) {
-                    var val = parseInt(cellNo.innerText.trim()) || 0;
-                    if (val > maxRnum) maxRnum = val;
+            # ------------------------------------------
+            # 7단계: 오늘 날짜 자동 입력
+            # ------------------------------------------
+            kst_now = datetime.utcnow() + timedelta(hours=9)
+            today_str = kst_now.strftime("%Y%m%d")
+            
+            print(f"👉 [7단계] 신고일자 시작일/종료일 오늘 날짜({today_str}) 설정...")
+            driver.execute_script(f"""
+                var fromInput = document.getElementById('mf_tacMain_contents_M9024_0_body_calfromReqstDt_input') || 
+                                document.getElementById('mf_tacMain_contents_M9024_body_calfromReqstDt_input') ||
+                                document.querySelector('[id*="calfromReqstDt_input"]');
+                var toInput = document.getElementById('mf_tacMain_contents_M9024_0_body_caltoReqstDt_input') || 
+                              document.getElementById('mf_tacMain_contents_M9024_body_caltoReqstDt_input') ||
+                              document.querySelector('[id*="caltoReqstDt_input"]');
+                
+                if (fromInput) {{
+                    fromInput.focus();
+                    fromInput.value = '{today_str}';
+                    fromInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    fromInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    fromInput.blur();
+                }}
+                if (toInput) {{
+                    toInput.focus();
+                    toInput.value = '{today_str}';
+                    toInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    toInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    toInput.blur();
+                }}
+            """)
+            time.sleep(2)
+
+            # ------------------------------------------
+            # 8단계: 메인 검색 버튼 클릭
+            # ------------------------------------------
+            print("👉 [8단계] 우측 상단 메인 [검색] 버튼 정밀 클릭...")
+            driver.execute_script("""
+                var searchBtn = document.getElementById('mf_tacMain_contents_M9024_body_udcSearch_btnSearch');
+                if (searchBtn) {
+                    var anchor = searchBtn.querySelector('a');
+                    if (anchor) { anchor.click(); } else { searchBtn.click(); }
                 }
-            }
-            return maxRnum > 0 ? maxRnum : 0;
-        """)
-        
-        print(f"📊 실시간 파싱된 총 데이터 건수: {total_count}건. 순번별 수집을 시작합니다.")
+            """)
+            print("⏳ 데이터 1차 조회 대기 중 (5초)...")
+            time.sleep(5)
 
-        for target_rnum in range(total_count, 0, -1):
-            print(f"\n--- [목표 순번: {target_rnum}] 데이터 수집 시도 ---")
-
+            # ------------------------------------------
+            # 9단계: '100개씩 보기' 선택 및 적용
+            # ------------------------------------------
+            print("👉 [9단계] 목록 표시 수 '100개씩 보기' 변경...")
             try:
-                # 💡 [핵심 개선] 스크롤을 휙 내리지 않고, 부드럽게 내리며 렌더링 안정화 대기 부여
-                click_success = driver.execute_script(f"""
-                    var targetRnum = {target_rnum};
-                    var scrollDiv = document.querySelector('[id*="tab1_grid_scrollY_div"]') || document.querySelector('.w2grid_scrollY');
-                    
-                    if (scrollDiv) {{ scrollDiv.scrollTop = 0; }}
-                    
-                    // 스크롤을 단계별로 내리면서 DOM 렌더링 대기 유도
-                    for (var s = 0; s < 40; s++) {{
-                        if (scrollDiv) {{ 
-                            scrollDiv.scrollTop = s * 25; 
-                        }}
-                        
-                        // 현재 스크롤 위치에서 해당 순번의 셀이 나타났는지 탐색
-                        for (var i = 0; i < 100; i++) {{
-                            var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
-                            if (cellNo && parseInt(cellNo.innerText.trim()) === targetRnum) {{
-                                var targetCell = document.querySelector('[id*="_tab1_grid_cell_' + i + '_3"]');
-                                if (targetCell) {{
-                                    targetCell.scrollIntoView({{ behavior: 'instant', block: 'center' }});
-                                    targetCell.click();
-                                    return true;
-                                }}
-                            }}
-                        }}
-                    }}
-                    return false;
+                select_element = driver.execute_script("""
+                    return document.getElementById('mf_tacMain_contents_M9024_0_body_udcGridPageView_sbxRecordCount_input_0') ||
+                           document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_sbxRecordCount_input_0') ||
+                           document.querySelector('[id*="sbxRecordCount_input_0"]');
                 """)
+                if select_element:
+                    select_box = Select(select_element)
+                    select_box.select_by_visible_text("100개씩 보기")
+                    driver.execute_script("""
+                        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+                    """, select_element)
+                    print("✅ '100개씩 보기' 적용 완료! 대기 중 (5초)...")
+                    time.sleep(5)
+            except Exception as sel_err:
+                print(f"⚠️ '100개씩 보기' 변경 중 예외 발생: {sel_err}")
 
-                # 만약 첫 시도에서 바로 안 잡히면 1초 쉬고 비상 스크롤 탐색 재시도
-                if not click_success:
-                    time.sleep(1)
+            # ------------------------------------------
+            # 10단계: 건수 파싱 및 전수 수집
+            # ------------------------------------------
+            print(f"👉 [10단계] {port_name} 총 건수 파싱 및 수집 시작...")
+            
+            total_count = driver.execute_script("""
+                var countSpan = document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_txtTotalDataCount');
+                if (countSpan) {
+                    var text = countSpan.innerText;
+                    var match = text.match(/\\d+/);
+                    if (match) { return parseInt(match[0]); }
+                }
+                var maxRnum = 0;
+                for (var i = 0; i < 100; i++) {
+                    var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
+                    if (cellNo) {
+                        var val = parseInt(cellNo.innerText.trim()) || 0;
+                        if (val > maxRnum) maxRnum = val;
+                    }
+                }
+                return maxRnum > 0 ? maxRnum : 0;
+            """)
+            
+            print(f"📊 [{port_name}] 실시간 파싱된 총 데이터 건수: {total_count}건.")
+
+            if total_count == 0:
+                print(f"⚠️ [{port_name}] 조회된 데이터가 없어 다음 항구로 이동합니다.")
+                continue
+
+            for target_rnum in range(total_count, 0, -1):
+                print(f"\n--- [{port_name} | 순번: {target_rnum}] 데이터 수집 시도 ---")
+
+                try:
                     click_success = driver.execute_script(f"""
                         var targetRnum = {target_rnum};
                         var scrollDiv = document.querySelector('[id*="tab1_grid_scrollY_div"]') || document.querySelector('.w2grid_scrollY');
                         
-                        if (scrollDiv) {{ scrollDiv.scrollTop = scrollDiv.scrollHeight; }}
+                        if (scrollDiv) {{ scrollDiv.scrollTop = 0; }}
                         
-                        for (var s = 30; s >= 0; s--) {{
-                            if (scrollDiv) {{ scrollDiv.scrollTop = s * 30; }}
+                        for (var s = 0; s < 40; s++) {{
+                            if (scrollDiv) {{ 
+                                scrollDiv.scrollTop = s * 25; 
+                            }}
                             
                             for (var i = 0; i < 100; i++) {{
                                 var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
@@ -268,123 +255,147 @@ def run_real_rpa_crawler():
                         return false;
                     """)
 
-                if not click_success:
-                    print(f"⚠️ [순번 {target_rnum}] 행을 끝내 찾지 못해 건너뜁니다.")
-                    continue
+                    if not click_success:
+                        time.sleep(1)
+                        click_success = driver.execute_script(f"""
+                            var targetRnum = {target_rnum};
+                            var scrollDiv = document.querySelector('[id*="tab1_grid_scrollY_div"]') || document.querySelector('.w2grid_scrollY');
+                            
+                            if (scrollDiv) {{ scrollDiv.scrollTop = scrollDiv.scrollHeight; }}
+                            
+                            for (var s = 30; s >= 0; s--) {{
+                                if (scrollDiv) {{ scrollDiv.scrollTop = s * 30; }}
+                                
+                                for (var i = 0; i < 100; i++) {{
+                                    var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
+                                    if (cellNo && parseInt(cellNo.innerText.trim()) === targetRnum) {{
+                                        var targetCell = document.querySelector('[id*="_tab1_grid_cell_' + i + '_3"]');
+                                        if (targetCell) {{
+                                            targetCell.scrollIntoView({{ behavior: 'instant', block: 'center' }});
+                                            targetCell.click();
+                                            return true;
+                                        }}
+                                    }}
+                                }}
+                            }}
+                            return false;
+                        """)
 
-                # 💡 [안정화 딜레이] 클릭 직후 서버가 버벅이지 않도록 확실하게 3초 대기
-                time.sleep(3.0)
+                    if not click_success:
+                        print(f"⚠️ [{port_name} | 순번 {target_rnum}] 행을 찾지 못해 건너뜁니다.")
+                        continue
 
-                # 신고서 기본 정보 수집
-                report_info = driver.execute_script("""
-                    var getVal = function(idPattern) {
-                        var el = document.querySelector('[id*="' + idPattern + '"]');
-                        return el ? (el.value || el.innerText || '') : '';
-                    };
-                    return {
-                        '선명': getVal('input270'),
-                        '호출부호': getVal('input269'),
-                        '사용목적': getVal('input274'),
-                        '운송형태': getVal('input276'),
-                        '화물명': getVal('input399'),
-                        '하역업체': getVal('input302'),
-                        '하역시작': getVal('input329'),
-                        '하역종료': getVal('input330'),
-                        '사용장소': getVal('input310'),
-                        '전출항지': getVal('input336')
-                    };
-                """)
+                    time.sleep(3.0)
 
-                ship_name = report_info['선명'] if report_info['선명'] else f"순번_{target_rnum}"
-                call_sign = report_info['호출부호']
-                use_purpose = report_info['사용목적']
-                transport_type = report_info['운송형태']
-                cargo_name = report_info['화물명']
-                haeyuk_corp = report_info['하역업체']
-                haeyuk_period = report_info['하역시작'] + ' ~ ' + report_info['하역종료']
-                use_place = report_info['사용장소']
-                prev_port = report_info['전출항지']
-
-                print(f"📌 [순번 {target_rnum}] 선명: {ship_name} (호출부호: {call_sign}) 상세 진입 성공")
-
-                # 적하일람표 탭 이동
-                driver.execute_script("""
-                    var tab = document.querySelector('[id*="_tabDgst_tab_tabs2_tabHTML"]');
-                    if (tab) tab.click();
-                """)
-                time.sleep(3.0) # 적하일람표 로딩 딜레이 넉넉히 부여
-
-                # 적하일람표 테이블 데이터 파싱
-                cargo_rows = driver.execute_script("""
-                    var extractedData = [];
-                    for (var r = 0; r < 50; r++) {
-                        var cellNo = document.querySelector('[id*="_tab3_grid_cell_' + r + '_0"]');
-                        if (!cellNo || cellNo.offsetParent === null) break;
-                        
-                        var getCellText = function(colIdx) {
-                            var el = document.querySelector('[id*="_tab3_grid_cell_' + r + '_' + colIdx + '"]');
-                            return el ? el.innerText.trim() : '';
+                    # 신고서 기본 정보 수집
+                    report_info = driver.execute_script("""
+                        var getVal = function(idPattern) {
+                            var el = document.querySelector('[id*="' + idPattern + '"]');
+                            return el ? (el.value || el.innerText || '') : '';
                         };
-                        
-                        extractedData.push([
-                            getCellText(3),  // UNNO
-                            getCellText(4),  // IMDG
-                            getCellText(5),  // 품명
-                            getCellText(6),  // 중량
-                            getCellText(7)   // 단위
-                        ]);
-                    }
-                    return extractedData;
-                """)
+                        return {
+                            '선명': getVal('input270'),
+                            '호출부호': getVal('input269'),
+                            '사용목적': getVal('input274'),
+                            '운송형태': getVal('input276'),
+                            '화물명': getVal('input399'),
+                            '하역업체': getVal('input302'),
+                            '하역시작': getVal('input329'),
+                            '하역종료': getVal('input330'),
+                            '사용장소': getVal('input310'),
+                            '전출항지': getVal('input336')
+                        };
+                    """)
 
-                if cargo_rows:
-                    for row in cargo_rows:
+                    ship_name = report_info['선명'] if report_info['선명'] else f"순번_{target_rnum}"
+                    call_sign = report_info['호출부호']
+                    use_purpose = report_info['사용목적']
+                    transport_type = report_info['운송형태']
+                    cargo_name = report_info['화물명']
+                    haeyuk_corp = report_info['하역업체']
+                    haeyuk_period = report_info['하역시작'] + ' ~ ' + report_info['하역종료']
+                    use_place = report_info['사용장소']
+                    prev_port = report_info['전출항지']
+
+                    print(f"📌 [{port_name} | 순번 {target_rnum}] 선명: {ship_name} (호출부호: {call_sign}) 상세 진입")
+
+                    # 적하일람표 탭 이동
+                    driver.execute_script("""
+                        var tab = document.querySelector('[id*="_tabDgst_tab_tabs2_tabHTML"]');
+                        if (tab) tab.click();
+                    """)
+                    time.sleep(3.0)
+
+                    # 적하일람표 테이블 데이터 파싱
+                    cargo_rows = driver.execute_script("""
+                        var extractedData = [];
+                        for (var r = 0; r < 50; r++) {
+                            var cellNo = document.querySelector('[id*="_tab3_grid_cell_' + r + '_0"]');
+                            if (!cellNo || cellNo.offsetParent === null) break;
+                            
+                            var getCellText = function(colIdx) {
+                                var el = document.querySelector('[id*="_tab3_grid_cell_' + r + '_' + colIdx + '"]');
+                                return el ? el.innerText.trim() : '';
+                            };
+                            
+                            extractedData.push([
+                                getCellText(3),  // UNNO
+                                getCellText(4),  // IMDG
+                                getCellText(5),  // 품명
+                                getCellText(6),  // 중량
+                                getCellText(7)   // 단위
+                            ]);
+                        }
+                        return extractedData;
+                    """)
+
+                    if cargo_rows:
+                        for row in cargo_rows:
+                            combined_row = [
+                                ship_name, call_sign, use_purpose, transport_type, cargo_name,
+                                haeyuk_corp, haeyuk_period, use_place, prev_port
+                            ] + row
+                            port_integrated_data.append(combined_row)
+                        print(f"✅ [{port_name} - {ship_name}] 적하일람표 {len(cargo_rows)}건 수집 완료!")
+                    else:
                         combined_row = [
                             ship_name, call_sign, use_purpose, transport_type, cargo_name,
                             haeyuk_corp, haeyuk_period, use_place, prev_port
-                        ] + row
-                        all_integrated_data.append(combined_row)
-                    print(f"✅ [{ship_name}] (순번: {target_rnum}) 적하일람표 {len(cargo_rows)}건 수집 완료!")
-                else:
-                    combined_row = [
-                        ship_name, call_sign, use_purpose, transport_type, cargo_name,
-                        haeyuk_corp, haeyuk_period, use_place, prev_port
-                    ] + ['', '', '', '', '']
-                    all_integrated_data.append(combined_row)
-                    print(f"⚠️ [{ship_name}] (순번: {target_rnum}) 기본 신고서 정보 수집 완료!")
+                        ] + ['', '', '', '', '']
+                        port_integrated_data.append(combined_row)
+                        print(f"⚠️ [{port_name} - {ship_name}] 기본 신고서 정보만 수집 완료!")
 
-                # 목록 탭 복귀 (복귀 후 충분히 숨 고르기)
-                driver.execute_script("""
-                    var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
-                    if (listTab) listTab.click();
-                """)
-                time.sleep(3.0)
+                    # 목록 탭 복귀
+                    driver.execute_script("""
+                        var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
+                        if (listTab) listTab.click();
+                    """)
+                    time.sleep(3.0)
 
-            except Exception as e:
-                print(f"⚠️ [순번 {target_rnum}] 처리 중 예외 발생: {e}")
-                driver.execute_script("""
-                    var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
-                    if (listTab) listTab.click();
-                """)
-                time.sleep(3.0)
-                continue
+                except Exception as e:
+                    print(f"⚠️ [{port_name} | 순번 {target_rnum}] 처리 중 예외 발생: {e}")
+                    driver.execute_script("""
+                        var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
+                        if (listTab) listTab.click();
+                    """)
+                    time.sleep(3.0)
+                    continue
 
-        # ------------------------------------------
-        # 11단계: 최종 통합 파일(CSV) 저장 (확장된 컬럼 반영)
-        # ------------------------------------------
-        if all_integrated_data:
-            columns = [
-                "선박명(선택)", "호출부호", "사용목적", "운송형태", "화물명",
-                "하역업체", "하역기간", "사용장소", "전출항지",
-                "UNNO", "IMDG", "품명", "중량", "단위"
-            ]
-            
-            df = pd.DataFrame(all_integrated_data, columns=columns)
-            output_filename = "hns_fully_integrated_report.csv"
-            df.to_csv(output_filename, index=False, encoding='utf-8-sig')
-            print(f"\n🎉 [최종 완료] 총 {len(all_integrated_data)}건의 데이터가 확장 항목 포함하여 '{output_filename}' 파일로 저장되었습니다!")
-        else:
-            print("\n⚠️ 수집된 데이터가 없습니다.")
+            # ------------------------------------------
+            # 11단계: 항구별 저장 (Loop 완료 시 저장)
+            # ------------------------------------------
+            if port_integrated_data:
+                columns = [
+                    "선박명(선택)", "호출부호", "사용목적", "운송형태", "화물명",
+                    "하역업체", "하역기간", "사용장소", "전출항지",
+                    "UNNO", "IMDG", "품명", "중량", "단위"
+                ]
+                
+                df = pd.DataFrame(port_integrated_data, columns=columns)
+                df.to_csv(output_filename, index=False, encoding='utf-8-sig')
+                print(f"\n🎉 [{port_name} 완료] 총 {len(port_integrated_data)}건의 데이터가 '{output_filename}' 파일로 저장되었습니다!")
+            else:
+                print(f"\n⚠️ [{port_name}] 수집된 데이터가 없습니다.")
 
     except Exception as e:
         print(f"❌ [전체 RPA 에러 발생]: {e}")
