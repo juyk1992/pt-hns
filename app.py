@@ -259,7 +259,7 @@ def load_integrated_hns_data(port_code):
     return None
 
 # ==========================================
-# 5. 항구별 데이터 렌더링 헬퍼 함수 (선박 선택 필터 박스 포함)
+# 5. 항구별 데이터 렌더링 헬퍼 함수 (단일 선박 선택 드롭다운)
 # ==========================================
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
@@ -276,23 +276,23 @@ def render_port_dashboard(port_name, port_code):
     if df is None or df.empty:
         st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 작동시켜 주세요.")
     else:
-        # 💡 [핵심 추가] 선박 선택 필터 박스 영역
+        # 💡 [단일 선택 드롭다운 적용]
         ship_column = "선박명(선택)" if "선박명(선택)" in df.columns else df.columns[0]
         unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
+        ship_options = ["전체 보기"] + unique_ships
         
         filter_col1, filter_col2 = st.columns([2, 1])
         with filter_col1:
-            selected_ships = st.multiselect(
-                f"🚢 [{port_name}] 조회할 선박을 선택하세요 (다중 선택 가능)",
-                options=unique_ships,
-                default=[],
-                key=f"select_ship_{port_code}",
-                placeholder="선박명을 선택하세요 (미선택 시 전체 표시)"
+            selected_ship = st.selectbox(
+                f"🚢 [{port_name}] 조회할 선박을 선택하세요",
+                options=ship_options,
+                index=0,
+                key=f"select_ship_{port_code}"
             )
         
-        # 선택 여부에 따른 데이터 필터링
-        if selected_ships:
-            filtered_df = df[df[ship_column].isin(selected_ships)]
+        # 선택에 따른 데이터 필터링
+        if selected_ship != "전체 보기":
+            filtered_df = df[df[ship_column] == selected_ship]
         else:
             filtered_df = df
 
