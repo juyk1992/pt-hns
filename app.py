@@ -331,13 +331,13 @@ def render_port_dashboard(port_name, port_code):
 # ==========================================
 
 # 메인 타이틀
-st.markdown('<div class="main-header">🚢 평택해양경찰서 HNS 실시간 안전관리 & AI 비상대응 솔루션</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">포트미스 + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>', unsafe_allow_html=True)
 
 # ------------------------------------------
 # 🔥 [통합] HNS 화학물질 AI 스마트 매핑 검색창 (항 구분 없음)
 # ------------------------------------------
-st.markdown("### 🔎 HNS 화학물질 AI 스마트 매핑 검색")
+st.markdown("### 🔎 화학물질 AI 스마트 검색")
 search_input = st.text_input(
     "화학물질명, 화학식, 관용명을 입력하세요 (예: H2SO4, 황산, 가성소다, LNG, 수산화나트륨)", 
     key="global_search_box"
