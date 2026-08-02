@@ -17,7 +17,7 @@ PORTMIS_ID = os.getenv("PORTMIS_ID", "")
 PORTMIS_PW = os.getenv("PORTMIS_PW", "")
 
 def run_real_rpa_crawler():
-    print("🤖 [종합 데이터 통합 마스터 RPA] 포트미스 자동화 봇 가동...")
+    print("🤖 [페이지네이션 기반 마스터 RPA] 포트미스 자동화 봇 가동...")
 
     options = webdriver.ChromeOptions()
     options.add_argument('--headless=new')          # 최신 Headless 모드
@@ -27,14 +27,14 @@ def run_real_rpa_crawler():
     options.add_argument('--window-size=1920,1080')
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-    # 1. 크롬 브라우저 바이너리 지정
+    # 크롬 브라우저 바이너리 지정
     chrome_binaries = ["/usr/bin/chromium-browser", "/usr/bin/google-chrome", "/usr/bin/chromium"]
     for bin_path in chrome_binaries:
         if os.path.exists(bin_path):
             options.binary_location = bin_path
             break
 
-    # 2. OCI/Linux ARM64 환경용 ChromeDriver Service 지정
+    # OCI/Linux ARM64 환경용 ChromeDriver Service 지정
     chromedriver_paths = ["/usr/bin/chromium-chromedriver", "/usr/bin/chromedriver"]
     chromedriver_bin = None
     for driver_path in chromedriver_paths:
@@ -58,16 +58,14 @@ def run_real_rpa_crawler():
 
     try:
         # ------------------------------------------
-        # 1단계 ~ 5단계: 로그인 및 페이지 진입 (1회만 수행)
+        # 1단계 ~ 5단계: 로그인 및 페이지 진입
         # ------------------------------------------
         print("👉 [1단계] 인트로 페이지 접속 중...")
         driver.get("https://new.portmis.go.kr/portmis/websquare/websquare.jsp?w2xPath=/portmis/w2/main/intro.xml")
         time.sleep(4)
 
         print("👉 [2단계] 로그인 팝업 호출...")
-        login_trigger = wait.until(
-            EC.element_to_be_clickable((By.ID, "mf_btnLogin"))
-        )
+        login_trigger = wait.until(EC.element_to_be_clickable((By.ID, "mf_btnLogin")))
         login_trigger.click()
         time.sleep(4)
 
@@ -92,9 +90,7 @@ def run_real_rpa_crawler():
         time.sleep(2)
 
         print("👉 [4단계] 팝업 내부 로그인 버튼 클릭...")
-        popup_login_btn = wait.until(
-            EC.element_to_be_clickable((By.ID, "mf_frameLogin1_btnLogin"))
-        )
+        popup_login_btn = wait.until(EC.element_to_be_clickable((By.ID, "mf_frameLogin1_btnLogin")))
         driver.execute_script("arguments[0].click();", popup_login_btn)
         print("⏳ 로그인 인증 대기 중 (8초)...")
         time.sleep(8)
@@ -126,12 +122,10 @@ def run_real_rpa_crawler():
             print(f"🚢 [{port_name} (청코드: {port_code})] 데이터 수집 프로세스 개시")
             print(f"==========================================")
 
-            port_integrated_data = [] # 항구별 데이터를 담을 독립 리스트
+            port_integrated_data = []
 
-            # ------------------------------------------
             # 6단계: 청코드 입력
-            # ------------------------------------------
-            print(f"👉 [6단계] 청코드 '{port_code}'({port_name}) 입력 및 갱신 이벤트 실행...")
+            print(f"👉 [6단계] 청코드 '{port_code}'({port_name}) 입력 및 갱신...")
             driver.execute_script(f"""
                 var codeInput = document.getElementById('mf_tacMain_contents_M9024_body_prtAgCd_cmmCd') || 
                                 document.querySelector('[id*="prtAgCd_cmmCd"]');
@@ -145,13 +139,11 @@ def run_real_rpa_crawler():
             """)
             time.sleep(3)
 
-            # ------------------------------------------
             # 7단계: 신고일자 자동 입력 (시작일: 7일 전 / 종료일: 오늘)
-            # ------------------------------------------
             kst_now = datetime.utcnow() + timedelta(hours=9)
             today_date = kst_now.date()
             today_str = kst_now.strftime("%Y%m%d")
-            from_str = (kst_now - timedelta(days=7)).strftime("%Y%m%d")  # 🔥 일주일 전 날짜
+            from_str = (kst_now - timedelta(days=7)).strftime("%Y%m%d")
 
             print(f"👉 [7단계] 신고일자 설정: 시작일({from_str}) ~ 종료일({today_str})...")
             driver.execute_script(f"""
@@ -179,10 +171,8 @@ def run_real_rpa_crawler():
             """)
             time.sleep(3)
 
-            # ------------------------------------------
             # 8단계: 메인 검색 버튼 클릭
-            # ------------------------------------------
-            print("👉 [8단계] 우측 상단 메인 [검색] 버튼 정밀 클릭...")
+            print("👉 [8단계] 메인 [검색] 버튼 클릭...")
             driver.execute_script("""
                 var searchBtn = document.getElementById('mf_tacMain_contents_M9024_body_udcSearch_btnSearch');
                 if (searchBtn) {
@@ -190,36 +180,10 @@ def run_real_rpa_crawler():
                     if (anchor) { anchor.click(); } else { searchBtn.click(); }
                 }
             """)
-            print("⏳ 데이터 1차 조회 대기 중 (7초)...")
-            time.sleep(7)
+            print("⏳ 데이터 조회 대기 중 (5초)...")
+            time.sleep(5)
 
-            # ------------------------------------------
-            # 9단계: '500개씩 보기' 선택 및 적용 (🔥 상향 조정)
-            # ------------------------------------------
-            print("👉 [9단계] 목록 표시 수 '500개씩 보기' 변경...")
-            try:
-                select_element = driver.execute_script("""
-                    return document.getElementById('mf_tacMain_contents_M9024_0_body_udcGridPageView_sbxRecordCount_input_0') ||
-                           document.getElementById('mf_tacMain_contents_M9024_body_udcGridPageView_sbxRecordCount_input_0') ||
-                           document.querySelector('[id*="sbxRecordCount_input_0"]');
-                """)
-                if select_element:
-                    select_box = Select(select_element)
-                    # 500개씩 보기 선택 (옵션 문구 매칭)
-                    select_box.select_by_visible_text("500개씩 보기")
-                    driver.execute_script("""
-                        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-                    """, select_element)
-                    print("✅ '500개씩 보기' 적용 완료! 대기 중 (7초)...")
-                    time.sleep(7)
-            except Exception as sel_err:
-                print(f"⚠️ '500개씩 보기' 변경 중 예외 발생: {sel_err}")
-
-            # ------------------------------------------
-            # 10단계: 건수 파싱 및 전수 수집
-            # ------------------------------------------
-            print(f"👉 [10단계] {port_name} 총 건수 파싱 및 수집 시작...")
-
+            # 9단계: 총 건수 및 총 페이지 수 파싱 (기본 10개씩 보기 유지)
             total_count = 0
             for attempt in range(4):
                 total_count = driver.execute_script("""
@@ -229,89 +193,82 @@ def run_real_rpa_crawler():
                         var match = text.match(/\\d+/);
                         if (match) { return parseInt(match[0]); }
                     }
-                    var maxRnum = 0;
-                    for (var i = 0; i < 500; i++) {
-                        var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
-                        if (cellNo) {
-                            var val = parseInt(cellNo.innerText.trim()) || 0;
-                            if (val > maxRnum) maxRnum = val;
-                        }
-                    }
-                    return maxRnum > 0 ? maxRnum : 0;
+                    return 0;
                 """)
                 if total_count > 0:
                     break
                 time.sleep(2)
 
-            print(f"📊 [{port_name}] 실시간 파싱된 총 데이터 건수: {total_count}건.")
+            print(f"📊 [{port_name}] 총 데이터 건수: {total_count}건")
 
             if total_count == 0:
-                print(f"⚠️ [{port_name}] 최근 7일간 조회된 데이터가 없어 다음 항구로 이동합니다.")
+                print(f"⚠️ [{port_name}] 조회된 데이터가 없어 다음 항구로 이동합니다.")
                 continue
 
-            for target_rnum in range(total_count, 0, -1):
-                print(f"\n--- [{port_name} | 순번: {target_rnum}] 데이터 수집 시도 ---")
+            total_pages = (total_count + 9) // 10  # 올림 계산 (10개씩)
+            print(f"📄 [{port_name}] 총 {total_pages}개 페이지 수집을 시작합니다.")
 
-                try:
-                    click_success = driver.execute_script(f"""
-                        var targetRnum = {target_rnum};
-                        var scrollDiv = document.querySelector('[id*="tab1_grid_scrollY_div"]') || document.querySelector('.w2grid_scrollY');
-                        
-                        if (scrollDiv) {{ scrollDiv.scrollTop = 0; }}
-                        
-                        for (var s = 0; s < 50; s++) {{
-                            if (scrollDiv) {{ 
-                                scrollDiv.scrollTop = s * 30; 
+            # ------------------------------------------
+            # 10단계: 페이지별 10개씩 순차 수집 (페이지네이션)
+            # ------------------------------------------
+            for page_idx in range(1, total_pages + 1):
+                print(f"\n==================== [{port_name} | {page_idx} / {total_pages} 페이지 수집] ====================")
+
+                # 페이지 이동 (1페이지가 아닐 경우 해당 페이지 번호 버튼 클릭)
+                if page_idx > 1:
+                    page_clicked = driver.execute_script(f"""
+                        var pageIdx = {page_idx};
+                        // 웹스퀘어 페이지네이션 컴포넌트 버튼 찾기
+                        var pageBtns = document.querySelectorAll('[id*="sbxRecordCount"] ~ div a, [class*="w2pglist"] a');
+                        for (var b = 0; b < pageBtns.length; b++) {{
+                            if (pageBtns[b].innerText.trim() === pageIdx.toString()) {{
+                                pageBtns[b].click();
+                                return true;
                             }}
-                            
-                            for (var i = 0; i < 500; i++) {{
-                                var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
-                                if (cellNo && parseInt(cellNo.innerText.trim()) === targetRnum) {{
-                                    var targetCell = document.querySelector('[id*="_tab1_grid_cell_' + i + '_3"]');
-                                    if (targetCell) {{
-                                        targetCell.scrollIntoView({{ behavior: 'instant', block: 'center' }});
-                                        targetCell.click();
-                                        return true;
-                                    }}
+                        }}
+                        // 만약 번호가 직접 안보일 경우 다음 그룹(>) 버튼 클릭 시도
+                        var nextGroupBtn = document.querySelector('[id*="btn_next_page"]') || document.querySelector('.w2pglist_next');
+                        if (nextGroupBtn) {{
+                            nextGroupBtn.click();
+                            return 'next_group';
+                        }}
+                        return false;
+                    """)
+                    time.sleep(3.5) # 페이지전환 대기
+
+                    # 10단위 페이지 그룹이 넘어가서 바로 번호가 안 눌렸을 시 재시도
+                    if page_clicked == 'next_group':
+                        driver.execute_script(f"""
+                            var pageIdx = {page_idx};
+                            var pageBtns = document.querySelectorAll('[id*="sbxRecordCount"] ~ div a, [class*="w2pglist"] a');
+                            for (var b = 0; b < pageBtns.length; b++) {{
+                                if (pageBtns[b].innerText.trim() === pageIdx.toString()) {{
+                                    pageBtns[b].click();
+                                    break;
                                 }}
                             }}
+                        """)
+                        time.sleep(3.5)
+
+                # 현재 페이지에 보이는 10개 행(인덱스 0~9) 순회
+                for row_idx in range(10):
+                    # 해당 행 클릭
+                    cell_found = driver.execute_script(f"""
+                        var rIdx = {row_idx};
+                        var cell = document.querySelector('[id*="_tab1_grid_cell_' + rIdx + '_3"]');
+                        if (cell && cell.offsetParent !== null) {{
+                            cell.click();
+                            return true;
                         }}
                         return false;
                     """)
 
-                    if not click_success:
-                        time.sleep(1)
-                        click_success = driver.execute_script(f"""
-                            var targetRnum = {target_rnum};
-                            var scrollDiv = document.querySelector('[id*="tab1_grid_scrollY_div"]') || document.querySelector('.w2grid_scrollY');
-                            
-                            if (scrollDiv) {{ scrollDiv.scrollTop = scrollDiv.scrollHeight; }}
-                            
-                            for (var s = 40; s >= 0; s--) {{
-                                if (scrollDiv) {{ scrollDiv.scrollTop = s * 30; }}
-                                
-                                for (var i = 0; i < 500; i++) {{
-                                    var cellNo = document.querySelector('[id*="_tab1_grid_cell_' + i + '_0"]');
-                                    if (cellNo && parseInt(cellNo.innerText.trim()) === targetRnum) {{
-                                        var targetCell = document.querySelector('[id*="_tab1_grid_cell_' + i + '_3"]');
-                                        if (targetCell) {{
-                                            targetCell.scrollIntoView({{ behavior: 'instant', block: 'center' }});
-                                            targetCell.click();
-                                            return true;
-                                        }}
-                                    }}
-                                }}
-                            }}
-                            return false;
-                        """)
+                    if not cell_found:
+                        break # 더 이상 행이 없으면 해당 페이지 완료
 
-                    if not click_success:
-                        print(f"⚠️ [{port_name} | 순번 {target_rnum}] 행을 찾지 못해 건너뜁니다.")
-                        continue
+                    time.sleep(2.5) # 상세화면 로딩 대기
 
-                    time.sleep(3.0)
-
-                    # 신고서 기본 정보 수집
+                    # 기본 신고서 정보 수집
                     report_info = driver.execute_script("""
                         var getVal = function(idPattern) {
                             var el = document.querySelector('[id*="' + idPattern + '"]');
@@ -331,7 +288,7 @@ def run_real_rpa_crawler():
                         };
                     """)
 
-                    ship_name = report_info['선명'] if report_info['선명'] else f"순번_{target_rnum}"
+                    ship_name = report_info['선명'] if report_info['선명'] else f"Page{page_idx}_Row{row_idx}"
                     call_sign = report_info['호출부호']
                     use_purpose = report_info['사용목적']
                     transport_type = report_info['운송형태']
@@ -343,15 +300,14 @@ def run_real_rpa_crawler():
                     use_place = report_info['사용장소']
                     prev_port = report_info['전출항지']
 
-                    # 🔥 [핵심 추가] 하역종료일자 파싱 및 오늘 날짜 이전 스킵 처리
-                    end_date_clean = re.sub(r'[^0-9]', '', haeyuk_end)[:8]  # '2026-08-02 14:00' -> '20260802'
+                    # 하역종료일자 파싱 및 오늘 이전 데이터 필터링
+                    end_date_clean = re.sub(r'[^0-9]', '', haeyuk_end)[:8]
                     
                     if end_date_clean and len(end_date_clean) == 8:
                         try:
                             end_date_obj = datetime.strptime(end_date_clean, "%Y%m%d").date()
                             if end_date_obj < today_date:
-                                print(f"⏭️ [{port_name} | 순번 {target_rnum}] 선명: {ship_name} ➔ 하역종료일({end_date_clean})이 오늘({today_str}) 이전이므로 스킵합니다.")
-                                # 목록 탭으로 복귀 후 스킵
+                                print(f"⏭️ [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} ➔ 하역종료일({end_date_clean})이 오늘 이전이므로 스킵")
                                 driver.execute_script("""
                                     var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
                                     if (listTab) listTab.click();
@@ -359,18 +315,18 @@ def run_real_rpa_crawler():
                                 time.sleep(2.0)
                                 continue
                         except Exception as dt_err:
-                            print(f"⚠️ 날짜 변환 중 오류 (진행 계속): {dt_err}")
+                            print(f"⚠️ 날짜 변환 실패 (계속 진행): {dt_err}")
 
-                    print(f"📌 [{port_name} | 순번 {target_rnum}] 선명: {ship_name} (호출부호: {call_sign}) 상세 수집 진입")
+                    print(f"📌 [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} (호출부호: {call_sign}) 수집 진행")
 
                     # 적하일람표 탭 이동
                     driver.execute_script("""
                         var tab = document.querySelector('[id*="_tabDgst_tab_tabs2_tabHTML"]');
                         if (tab) tab.click();
                     """)
-                    time.sleep(3.0)
+                    time.sleep(2.5)
 
-                    # 적하일람표 테이블 데이터 파싱
+                    # 적하일람표 파싱
                     cargo_rows = driver.execute_script("""
                         var extractedData = [];
                         for (var r = 0; r < 50; r++) {
@@ -400,33 +356,24 @@ def run_real_rpa_crawler():
                                 haeyuk_corp, haeyuk_period, use_place, prev_port
                             ] + row
                             port_integrated_data.append(combined_row)
-                        print(f"✅ [{port_name} - {ship_name}] 적하일람표 {len(cargo_rows)}건 수집 완료!")
+                        print(f"✅ [{ship_name}] 적하일람표 {len(cargo_rows)}건 수집 완료!")
                     else:
                         combined_row = [
                             ship_name, call_sign, use_purpose, transport_type, cargo_name,
                             haeyuk_corp, haeyuk_period, use_place, prev_port
                         ] + ['', '', '', '', '']
                         port_integrated_data.append(combined_row)
-                        print(f"⚠️ [{port_name} - {ship_name}] 기본 신고서 정보만 수집 완료!")
+                        print(f"⚠️ [{ship_name}] 기본 신고서 정보 수집 완료!")
 
                     # 목록 탭 복귀
                     driver.execute_script("""
                         var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
                         if (listTab) listTab.click();
                     """)
-                    time.sleep(3.0)
-
-                except Exception as e:
-                    print(f"⚠️ [{port_name} | 순번 {target_rnum}] 처리 중 예외 발생: {e}")
-                    driver.execute_script("""
-                        var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
-                        if (listTab) listTab.click();
-                    """)
-                    time.sleep(3.0)
-                    continue
+                    time.sleep(2.5)
 
             # ------------------------------------------
-            # 11단계: 항구별 저장
+            # 11단계: 항구별 CSV 저장
             # ------------------------------------------
             if port_integrated_data:
                 columns = [
@@ -434,12 +381,11 @@ def run_real_rpa_crawler():
                     "하역업체", "하역기간", "사용장소", "전출항지",
                     "UNNO", "IMDG", "품명", "중량", "단위"
                 ]
-                
                 df = pd.DataFrame(port_integrated_data, columns=columns)
                 df.to_csv(output_filename, index=False, encoding='utf-8-sig')
-                print(f"\n🎉 [{port_name} 완료] 총 {len(port_integrated_data)}건의 데이터가 '{output_filename}' 파일로 저장되었습니다!")
+                print(f"\n🎉 [{port_name} 완료] 총 {len(port_integrated_data)}건 수집 완료 -> '{output_filename}' 저장")
             else:
-                print(f"\n⚠️ [{port_name}] 수집 대상(현재 하역 진행 중) 데이터가 없습니다.")
+                print(f"\n⚠️ [{port_name}] 조건에 맞는 수집 대상 데이터가 없습니다.")
 
     except Exception as e:
         print(f"❌ [전체 RPA 에러 발생]: {e}")
