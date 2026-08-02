@@ -139,11 +139,11 @@ def run_real_rpa_crawler():
             """)
             time.sleep(3)
 
-            # 7단계: 신고일자 자동 입력 (시작일: 7일 전 / 종료일: 오늘)
+            # 7단계: 신고일자 자동 입력 (시작일: 3일 전 / 종료일: 오늘)
             kst_now = datetime.utcnow() + timedelta(hours=9)
             today_date = kst_now.date()
             today_str = kst_now.strftime("%Y%m%d")
-            from_str = (kst_now - timedelta(days=7)).strftime("%Y%m%d")
+            from_str = (kst_now - timedelta(days=3)).strftime("%Y%m%d")
 
             print(f"👉 [7단계] 신고일자 설정: 시작일({from_str}) ~ 종료일({today_str})...")
             driver.execute_script(f"""
