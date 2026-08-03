@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Reflex 스타일 Custom CSS (모바일 다크모드 드롭다운 완벽 보정)
+# 0. 페이지 설정 & Reflex 스타일 Custom CSS
 # ==========================================
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Reflex.dev 감성 Light UI + 모바일 다크모드 드롭다운 완벽 보정 CSS
+# Reflex.dev 감성 Light UI + 모바일 완벽 가시성 보장 CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
@@ -69,31 +69,57 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [핵심 보정] 모바일 다크모드 Selectbox 드롭다운 팝업 텍스트/배경색 강제 고정 */
-    .stTextInput input, .stSelectbox [data-baseweb="select"] {
+    /* 💡 [라디오 버튼 칩(Chip) 스타일링] 모바일 다크모드 영향 0% 구현 */
+    div[data-testid="stRadio"] > label {
+        display: none !important; /* 라디오 기본 라벨 숨김 */
+    }
+
+    div[data-testid="stRadio"] > div {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+        background-color: transparent !important;
+    }
+
+    div[data-testid="stRadio"] > div > label {
+        background-color: #FFFFFF !important;
+        border: 1.5px solid #CBD5E1 !important;
+        border-radius: 20px !important; /* 둥근 알약 스타일 */
+        padding: 6px 16px !important;
+        color: #0F172A !important;
+        font-weight: 600 !important;
+        font-size: 0.9rem !important;
+        cursor: pointer !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        transition: all 0.2s ease !important;
+    }
+
+    /* 라디오 원형 체크 아이콘 숨기기 (알약 버튼처럼 보이도록) */
+    div[data-testid="stRadio"] > div > label > div:first-child {
+        display: none !important;
+    }
+
+    /* 선택된 칩 버튼 강조 */
+    div[data-testid="stRadio"] > div > label[data-checked="true"],
+    div[data-testid="stRadio"] > div > label:has(input:checked) {
+        background-color: #3B82F6 !important;
+        border-color: #2563EB !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
+    }
+
+    div[data-testid="stRadio"] > div > label[data-checked="true"] *,
+    div[data-testid="stRadio"] > div > label:has(input:checked) * {
+        color: #FFFFFF !important;
+    }
+
+    /* 텍스트 입력창 */
+    .stTextInput input {
         background-color: #FFFFFF !important;
         border: 1px solid #CBD5E1 !important;
         border-radius: 12px !important;
         color: #0F172A !important;
         font-weight: 600 !important;
-    }
-
-    /* 모바일 다크모드에서 펼쳐지는 드롭다운 메뉴 레이어 강제 밝은 배경 & 짙은 글자 고정 */
-    div[data-baseweb="popover"],
-    div[data-baseweb="popover"] *,
-    div[data-baseweb="menu"],
-    div[data-baseweb="menu"] *,
-    ul[role="listbox"],
-    ul[role="listbox"] * {
-        background-color: #FFFFFF !important;
-        color: #0F172A !important;
-    }
-
-    /* 드롭다운 항목 hover/active 상태 */
-    li[role="option"]:hover,
-    li[role="option"][aria-selected="true"] {
-        background-color: #E2E8F0 !important;
-        color: #2563EB !important;
     }
 
     /* Reflex 파란색 버튼 */
@@ -378,14 +404,16 @@ def render_port_dashboard(port_name, port_code):
         unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
         ship_options = ["전체 보기"] + unique_ships
         
-        filter_col1, filter_col2 = st.columns([2, 1])
-        with filter_col1:
-            selected_ship = st.selectbox(
-                f"🚢 [{port_name}] 조회할 선박을 선택하세요",
-                options=ship_options,
-                index=0,
-                key=f"select_ship_{port_code}"
-            )
+        # 💡 [핵심 변경] 드롭다운 팝업 대신 알약형 칩(Chip) 라디오 버튼으로 변경
+        st.markdown(f"**🚢 [{port_name}] 조회할 선박 선택**")
+        selected_ship = st.radio(
+            label=f"ship_radio_{port_code}",
+            options=ship_options,
+            index=0,
+            horizontal=True,
+            key=f"select_ship_radio_{port_code}"
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
         
         if selected_ship != "전체 보기":
             filtered_df = df[df[ship_column] == selected_ship]
