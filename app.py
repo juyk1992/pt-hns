@@ -22,43 +22,86 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
 
-    /* [핵심] 모바일/다크모드 강제 오버라이드 및 기본 폰트 설정 */
+    /* ==========================================
+       1. 기본 라이트 모드 테마 변수 정의
+       ========================================== */
+    :root {
+        --bg-main: #F8FAFC;
+        --bg-card: #FFFFFF;
+        --bg-sub: #F1F5F9;
+        --text-main: #0F172A;
+        --text-sub: #64748B;
+        --border-color: #E2E8F0;
+        --accent-blue: #3B82F6;
+        --accent-blue-hover: #2563EB;
+    }
+
+    /* ==========================================
+       2. 다크 모드 자동 감지 및 변수 재정의
+       ========================================== */
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg-main: #0F172A;
+            --bg-card: #1E293B;
+            --bg-sub: #334155;
+            --text-main: #F8FAFC;
+            --text-sub: #94A3B8;
+            --border-color: #334155;
+            --accent-blue: #60A5FA;
+            --accent-blue-hover: #3B82F6;
+        }
+    }
+
+    /* Streamlit 테마 설정이 다크일 때도 강제 반영 */
+    [data-theme="dark"] {
+        --bg-main: #0F172A;
+        --bg-card: #1E293B;
+        --bg-sub: #334155;
+        --text-main: #F8FAFC;
+        --text-sub: #94A3B8;
+        --border-color: #334155;
+        --accent-blue: #60A5FA;
+        --accent-blue-hover: #3B82F6;
+    }
+
+    /* ==========================================
+       3. 동적 변수 기반 글로벌 스타일 적용
+       ========================================== */
     html, body, [class*="css"], .stApp {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
-        background-color: #F8FAFC !important;
-        color: #0F172A !important;
+        background-color: var(--bg-main) !important;
+        color: var(--text-main) !important;
     }
 
-    /* Streamlit 기본 모바일 다크모드 텍스트 반전 방지 */
     p, span, div, label, h1, h2, h3, h4, h5, h6 {
-        color: #0F172A !important;
+        color: var(--text-main) !important;
     }
 
-    /* 상단 Hero 대시보드 카운터 */
+    /* Hero 컨테이너 */
     .hero-container {
         padding: 2rem;
-        background: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 20px !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05) !important;
         margin-bottom: 1.5rem;
     }
     
     .main-header {
         font-size: 2.1rem;
         font-weight: 800;
-        color: #0F172A !important;
+        color: var(--text-main) !important;
         letter-spacing: -0.5px;
         margin-bottom: 6px;
     }
     
     .sub-header {
-        color: #64748B !important;
+        color: var(--text-sub) !important;
         font-size: 0.95rem;
         font-weight: 500;
     }
 
-    /* UNNO 및 IMDG 배지 스타일 */
+    /* UNNO 배지 */
     .badge-unno {
         background-color: #EF4444 !important;
         color: #FFFFFF !important;
@@ -69,50 +112,47 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [CSS Grid 기반 2줄 고정 가로 스크롤] 데스크톱/모바일 완벽 동기화 */
+    /* 2줄 고정 가로 스크롤 선박 칩(Radio) */
     div[data-testid="stRadio"] > label {
         display: none !important;
     }
 
     div[data-testid="stRadio"] > div {
         display: grid !important;
-        grid-template-rows: repeat(2, 38px) !important; /* 무조건 완벽하게 2줄 고정 */
-        grid-auto-flow: column !important;               /* 오른쪽 방향으로 가로 배치 */
-        grid-auto-columns: max-content !important;        /* 칩 글자 길이에 맞춰 자동 폭 조정 */
+        grid-template-rows: repeat(2, 38px) !important;
+        grid-auto-flow: column !important;
+        grid-auto-columns: max-content !important;
         gap: 8px 8px !important;
-        overflow-x: auto !important;                      /* 좌우 가로 스크롤 */
+        overflow-x: auto !important;
         overflow-y: hidden !important;
         padding-bottom: 8px !important;
         -webkit-overflow-scrolling: touch !important;
     }
 
-    /* 슬림 모바일/데스크톱 가로 스크롤바 디자인 */
     div[data-testid="stRadio"] > div::-webkit-scrollbar {
         height: 5px !important;
     }
     div[data-testid="stRadio"] > div::-webkit-scrollbar-track {
-        background: #F1F5F9 !important;
+        background: var(--bg-sub) !important;
         border-radius: 10px !important;
     }
     div[data-testid="stRadio"] > div::-webkit-scrollbar-thumb {
-        background: #CBD5E1 !important;
+        background: var(--border-color) !important;
         border-radius: 10px !important;
     }
 
-    /* 알약 버튼 개별 스타일 */
     div[data-testid="stRadio"] > div > label {
         height: 38px !important;
         display: inline-flex !important;
         align-items: center !important;
-        background-color: #FFFFFF !important;
-        border: 1.5px solid #CBD5E1 !important;
+        background-color: var(--bg-card) !important;
+        border: 1.5px solid var(--border-color) !important;
         border-radius: 20px !important;
         padding: 0 16px !important;
-        color: #0F172A !important;
+        color: var(--text-main) !important;
         font-weight: 600 !important;
         font-size: 0.88rem !important;
         cursor: pointer !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
         white-space: nowrap !important;
     }
 
@@ -120,99 +160,91 @@ st.markdown("""
         display: none !important;
     }
 
+    /* 선택된 칩 */
     div[data-testid="stRadio"] > div > label[data-checked="true"],
     div[data-testid="stRadio"] > div > label:has(input:checked) {
-        background-color: #3B82F6 !important;
-        border-color: #2563EB !important;
+        background-color: var(--accent-blue) !important;
+        border-color: var(--accent-blue) !important;
         color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
     }
 
     div[data-testid="stRadio"] > div > label[data-checked="true"] *,
     div[data-testid="stRadio"] > div > label:has(input:checked) * {
         color: #FFFFFF !important;
     }
-    
-    /* 텍스트 입력창 */
+
+    /* 입력창 */
     .stTextInput input {
-        background-color: #FFFFFF !important;
-        border: 1px solid #CBD5E1 !important;
+        background-color: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 12px !important;
-        color: #0F172A !important;
+        color: var(--text-main) !important;
         font-weight: 600 !important;
     }
 
-    /* 💡 [수정] Reflex 파란색 버튼 및 내부 텍스트 흰색 강제 고정 */
+    /* 버튼 */
     .stButton > button {
         border-radius: 12px !important;
-        background-color: #3B82F6 !important;
-        color: #FFFFFF !important;               /* 버튼 기본 글자색 흰색 고정 */
+        background-color: var(--accent-blue) !important;
+        color: #FFFFFF !important;
         border: none !important;
         font-weight: 600 !important;
         font-size: 0.9rem !important;
         padding: 0.5rem 1rem !important;
-        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25) !important;
         transition: all 0.2s ease !important;
     }
 
-    /* 버튼 내부 span, div, p 등 모든 하위 텍스트 요소를 흰색으로 강제 변경 */
     .stButton > button * {
         color: #FFFFFF !important;
     }
 
-    /* 마우스 호버 / 터치 시 스타일 */
-    .stButton > button:hover, .stButton > button:active, .stButton > button:focus {
-        background-color: #2563EB !important;
-        color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
-    }
-
-    .stButton > button:hover * {
+    .stButton > button:hover, .stButton > button:active {
+        background-color: var(--accent-blue-hover) !important;
         color: #FFFFFF !important;
     }
 
-    /* 아코디언(Expander) UI 스타일링 */
+    /* Expander(아코디언) */
     .streamlit-expanderHeader {
-        background-color: #FFFFFF !important;
+        background-color: var(--bg-card) !important;
         border-radius: 14px !important;
-        border: 1px solid #E2E8F0 !important;
-        color: #0F172A !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--text-main) !important;
         font-weight: 700 !important;
         padding: 0.8rem 1rem !important;
     }
 
     .streamlit-expanderContent {
-        background-color: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
+        background-color: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-top: none !important;
         border-bottom-left-radius: 14px !important;
         border-bottom-right-radius: 14px !important;
         padding: 1rem !important;
     }
 
-    /* 세련된 Reflex 스타일 탭(Tabs) 디자인 */
+    /* 탭(Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
         background-color: transparent !important;
-        border-bottom: 2px solid #E2E8F0 !important;
+        border-bottom: 2px solid var(--border-color) !important;
         padding-bottom: 4px;
     }
 
     .stTabs [data-baseweb="tab"] {
         height: 44px !important;
-        background-color: #F1F5F9 !important;
+        background-color: var(--bg-sub) !important;
         border-radius: 12px !important;
-        color: #64748B !important;
+        color: var(--text-sub) !important;
         font-weight: 600 !important;
         font-size: 0.95rem !important;
         padding: 0 18px !important;
-        border: 1px solid #E2E8F0 !important;
+        border: 1px solid var(--border-color) !important;
     }
 
     .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        color: #2563EB !important;
-        border: 1.5px solid #3B82F6 !important;
+        background-color: var(--bg-card) !important;
+        color: var(--accent-blue) !important;
+        border: 1.5px solid var(--accent-blue) !important;
         font-weight: 700 !important;
     }
 
@@ -221,7 +253,7 @@ st.markdown("""
     }
 
     [data-testid="stMetricValue"] {
-        color: #3B82F6 !important;
+        color: var(--accent-blue) !important;
         font-weight: 800 !important;
     }
 </style>
