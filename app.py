@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Reflex.dev 감성 Light UI + 모바일 가독성 완벽 보정 CSS
+# Reflex.dev 감성 Light UI + 모바일 다크모드 완벽 대응 CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
@@ -79,19 +79,40 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 텍스트 입력창 & 셀렉트박스 */
+    /* 💡 [핵심 보정] 다크모드 모바일용 Selectbox & Dropdown Popover 스타일 고정 */
     .stTextInput input, .stSelectbox [data-baseweb="select"] {
         background-color: #FFFFFF !important;
         border: 1px solid #CBD5E1 !important;
         border-radius: 12px !important;
         color: #0F172A !important;
-        font-weight: 500 !important;
+        font-weight: 600 !important;
         font-size: 0.95rem !important;
         padding: 0.6rem 0.8rem !important;
     }
 
     .stTextInput input::placeholder {
         color: #94A3B8 !important;
+    }
+
+    /* Selectbox 드롭다운 팝업 메뉴 전체 가독성 강제 보정 */
+    div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+        background-color: #FFFFFF !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+    }
+
+    /* 드롭다운 개별 옵션 항목 텍스트 & 배경색 */
+    li[role="option"], li[role="option"] span, div[data-baseweb="select"] span {
+        color: #0F172A !important;
+        background-color: #FFFFFF !important;
+        font-weight: 500 !important;
+    }
+
+    /* 드롭다운 터치/호버(마우스 올렸을 때) 항목 배경색 */
+    li[role="option"]:hover, li[role="option"][aria-selected="true"] {
+        background-color: #E2E8F0 !important;
+        color: #2563EB !important;
     }
 
     /* Reflex 시그니처 파란색 모던 버튼 */
@@ -132,7 +153,7 @@ st.markdown("""
         padding: 1rem !important;
     }
 
-    /* 💡 [개선된 영역] 세련된 Reflex 스타일 탭(Tabs) 디자인 */
+    /* 세련된 Reflex 스타일 탭(Tabs) 디자인 */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
         background-color: transparent !important;
