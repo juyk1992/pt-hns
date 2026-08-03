@@ -307,14 +307,18 @@ def find_hns_raw_text(query):
     return None
 
 # ==========================================
-# 2. 공공 API 연동 모듈
+# 2. 공공 API 연동 모듈 (수정 완료)
 # ==========================================
 def fetch_dgst_info(unno):
+    """
+    [해양수산부 위험물정보 API]
+    수집 항목: imdgNm, imdgEngNm, kndNm, kndPrdlstNm, imdgGradCd, emergManagtCd, ldadngMth, catinMatter
+    """
     url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
     params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
-        "imdgNm": "", "imdgEngNm": "", "emergManagtCd": "-", "packngGrad": "-",
-        "imdgGradCd": "-", "kndNm": "-", "packngGdline": "-", "ldadngMth": "-"
+        "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
+        "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
     }
     try:
         res = requests.get(url, params=params, timeout=5)
@@ -323,53 +327,66 @@ def fetch_dgst_info(unno):
         if item is not None:
             info['imdgNm'] = item.findtext('imdgNm', '')
             info['imdgEngNm'] = item.findtext('imdgEngNm', '')
-            info['emergManagtCd'] = item.findtext('emergManagtCd', '-')
-            info['packngGrad'] = item.findtext('packngGrad', '-')
-            info['imdgGradCd'] = item.findtext('imdgGradCd', '-')
             info['kndNm'] = item.findtext('kndNm', '-')
-            info['packngGdline'] = item.findtext('packngGdline', '-')
+            info['kndPrdlstNm'] = item.findtext('kndPrdlstNm', '-')
+            info['imdgGradCd'] = item.findtext('imdgGradCd', '-')
+            info['emergManagtCd'] = item.findtext('emergManagtCd', '-')
             info['ldadngMth'] = item.findtext('ldadngMth', '-')
+            info['catinMatter'] = item.findtext('catinMatter', '-')
     except Exception as e:
         print(f"위험물정보 API 에러: {e}")
     return info
 
-def fetch_chem_safety_info(chem_name):
+def fetch_chem_safety_info(cas_no):
+    """
+    [화학물질안전원 화학물질 안전관리정보 API]
+    요청 파라미터: serviceKey, numOfRows, pageNo, casNo
+    응답 수집 항목: symptom, inhale, skin, eyeball, oral, etc
+    """
     url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
-    clean_name = chem_name.split('(')[0].strip()
-    params = {'serviceKey': PUBLIC_API_KEY, 'numOfRows': '3', 'pageNo': '1', 'chemKo': clean_name}
+    
+    # casNo가 올바르지 않거나 없을 경우 예외 처리
+    if not cas_no or cas_no in ["-", "0000", "없음"]:
+        return {
+            "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음",
+            "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
+        }
+
+    clean_cas = str(cas_no).strip()
+    params = {'serviceKey': PUBLIC_API_KEY, 'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
-        "casNo": "-", "symptom": "자료 없음", "inhale": "자료 없음", 
-        "skin": "자료 없음", "eyeball": "자료 없음", "oral": "자료 없음"
+        "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음", 
+        "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
     }
     try:
         res = requests.get(url, params=params, timeout=5)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
-            safety_data['casNo'] = item.findtext('casNo', '-')
             safety_data['symptom'] = item.findtext('symptom', '자료 없음')
             safety_data['inhale'] = item.findtext('inhale', '자료 없음')
             safety_data['skin'] = item.findtext('skin', '자료 없음')
             safety_data['eyeball'] = item.findtext('eyeball', '자료 없음')
             safety_data['oral'] = item.findtext('oral', '자료 없음')
+            safety_data['etc'] = item.findtext('etc', '자료 없음')
     except Exception as e:
         print(f"화학물질 안전관리정보 API 에러: {e}")
     return safety_data
 
 # ==========================================
-# 3. Gemini 자연어 매핑 및 AI 요약
+# 3. Gemini 자연어 매핑 및 AI 요약 (CAS 번호 추가)
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
     if not GEMINI_API_KEY or not query_text:
-        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
+        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
 
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         prompt = f"""
         사용자 입력 검색어: "{query_text}"
         이 화학물질/관용명/화학식에 해당하는 가장 대표적인 위험물/HNS 화학물질의 표준 정보를 찾아 아래 JSON 포맷으로만 답변하세요. 다른 설명은 금지합니다:
-        {{"chem_ko": "공식 한글명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호"}}
+        {{"chem_ko": "공식 한글명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호", "cas_no": "CAS번호(예: 7664-93-9)"}}
         """
         
         candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
@@ -381,11 +398,11 @@ def map_search_query_with_gemini(query_text):
             except Exception:
                 continue
 
-        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
+        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
     except Exception:
-        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
+        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
 
-def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
+def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info):
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
         
@@ -403,15 +420,19 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         [해양수산부 위험물정보 API 수집 데이터]
         - 물질명: {chem_name} (UN NO: {unno})
         - IMDG 명칭: {dgst_info.get('imdgNm')} ({dgst_info.get('imdgEngNm')})
-        - IMDG 등급코드: {dgst_info.get('imdgGradCd', '-')} ({dgst_info.get('kndNm', '-')})
-        - 포장등급 / 포장지침: {dgst_info.get('packngGrad', '-')} / {dgst_info.get('packngGdline', '-')}
+        - IMDG 등급코드 / 종류명: {dgst_info.get('imdgGradCd', '-')} / {dgst_info.get('kndNm', '-')}
+        - 종류품목명: {dgst_info.get('kndPrdlstNm', '-')}
         - 비상조치코드(EmS): {dgst_info.get('emergManagtCd', '-')}
         - 선박 적재방법: {dgst_info.get('ldadngMth', '-')}
+        - 주의사항: {dgst_info.get('catinMatter', '-')}
 
-        [화학물질안전원 안전관리정보 API 수집 데이터]
-        - CAS 번호: {safety_info.get('casNo', '-')}
+        [화학물질안전원 안전관리정보 API 수집 데이터 (CAS NO: {cas_no})]
         - 일반 증상 및 표적장기: {safety_info.get('symptom', '-')}
-        - 흡입/피부/안구/경구 영향: {safety_info.get('inhale', '-')}, {safety_info.get('skin', '-')}, {safety_info.get('eyeball', '-')}, {safety_info.get('oral', '-')}
+        - 흡입 영향: {safety_info.get('inhale', '-')}
+        - 피부 노출 영향: {safety_info.get('skin', '-')}
+        - 안구 노출 영향: {safety_info.get('eyeball', '-')}
+        - 경구 섭취 영향: {safety_info.get('oral', '-')}
+        - 기타 유의사항: {safety_info.get('etc', '-')}
 
         [작성 핵심 규칙]
         ★ 최상단 핵심요약문은 **장황한 설명글을 절대 금지**하며, 현장 요원이 보고 1초만에 지시/전파할 수 있도록 **핵심 키워드, 수치(M단위), 구체적 단어 위주로 극도로 간결하게 표 형태로 작성**하세요.
@@ -427,10 +448,10 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         | **초동 행동수칙** | **[풍상위치]** + [핵심금지사항 및 소화약제 요약] |
 
         ---
-        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (EmS/적재방법)
+        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (EmS/적재방법/주의사항)
         ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령
         ### 3. ⛔ 절대 금지 행동 (금기 사항 - 물 접촉 금지, 직사주수 금지 등)
-        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
+        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구/기타)
         """
 
         candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
@@ -466,7 +487,7 @@ def load_integrated_hns_data(port_code):
     return None
 
 # ==========================================
-# 5. 항구별 데이터 렌더링 헬퍼 함수
+# 5. 항구별 데이터 렌더링 헬퍼 함수 (CAS_NO 적용)
 # ==========================================
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
@@ -546,15 +567,16 @@ def render_port_dashboard(port_name, port_code):
                     with c_btn:
                         button_key = f"btn_{port_code}_{ship}_{idx}_{unno}"
                         if st.button("🤖 AI 가이드 생성", key=button_key, use_container_width=True):
-                            st.session_state['active_chem'] = chem_name
+                            # AI가 CAS 번호까지 정밀 추출하도록 바인딩
+                            mapped_info = map_search_query_with_gemini(chem_name)
+                            st.session_state['active_chem'] = mapped_info.get("chem_ko", chem_name)
                             st.session_state['active_unno'] = unno
+                            st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
 
 # ==========================================
 # 6. 메인 화면 구성 (Hero Section & 로고 정렬)
 # ==========================================
-
-# Base64 로고가 존재할 경우 HTML 카드 내부에서 제목과 수직 정렬로 선명하게 표시합니다.
 if kcg_logo_b64:
     st.markdown(f"""
     <div class="hero-container">
@@ -588,14 +610,16 @@ if search_input:
         mapped_ko = mapped_result.get("chem_ko", search_input)
         mapped_eng = mapped_result.get("chem_eng", search_input)
         mapped_unno = str(mapped_result.get("unno", "0000")).zfill(4)
+        mapped_cas = str(mapped_result.get("cas_no", "-"))
         
         c1, c2 = st.columns([4, 1])
         with c1:
-            st.info(f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}`")
+            st.info(f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`")
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
                 st.session_state['active_chem'] = mapped_ko
                 st.session_state['active_unno'] = mapped_unno
+                st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
 
 # AI 대응 가이드 출력 모달/컨테이너
@@ -603,20 +627,23 @@ if 'active_chem' in st.session_state:
     st.divider()
     chem = st.session_state['active_chem']
     unno = st.session_state['active_unno']
+    cas = st.session_state.get('active_cas', '-')
     ship_info = st.session_state['active_ship']
     
-    st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno})")
+    st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno} / CAS NO: {cas})")
     
     with st.spinner('공공 API + 해경 HNS 정보집 + Gemini AI 가이드 생성 중...'):
         dgst_info = fetch_dgst_info(unno)
-        safety_info = fetch_chem_safety_info(chem)
-        ai_summary = generate_gemini_summary(chem, unno, dgst_info, safety_info)
+        safety_info = fetch_chem_safety_info(cas)  # casNo 파라미터를 정상 활용!
+        ai_summary = generate_gemini_summary(chem, unno, cas, dgst_info, safety_info)
         
     st.markdown(ai_summary)
     
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
         del st.session_state['active_chem']
         del st.session_state['active_unno']
+        if 'active_cas' in st.session_state:
+            del st.session_state['active_cas']
         del st.session_state['active_ship']
         st.rerun()
 
