@@ -307,12 +307,11 @@ def find_hns_raw_text(query):
     return None
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (수정 완료)
+# 2. 공공 API 연동 모듈
 # ==========================================
 def fetch_dgst_info(unno):
     """
     [해양수산부 위험물정보 API]
-    수집 항목: imdgNm, imdgEngNm, kndNm, kndPrdlstNm, imdgGradCd, emergManagtCd, ldadngMth, catinMatter
     """
     url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
     params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
@@ -340,8 +339,6 @@ def fetch_dgst_info(unno):
 def fetch_chem_safety_info(cas_no):
     """
     [화학물질안전원 화학물질 안전관리정보 API]
-    요청 파라미터: serviceKey, numOfRows, pageNo, casNo
-    응답 수집 항목: symptom, inhale, skin, eyeball, oral, etc
     """
     url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
     
@@ -372,6 +369,72 @@ def fetch_chem_safety_info(cas_no):
         print(f"화학물질 안전관리정보 API 에러: {e}")
     return safety_data
 
+def fetch_kosha_msds_info(chem_name, cas_no, unno):
+    """
+    [안전보건공단 MSDS OPEN API 연동]
+    1. getChemList: 국문명(0) -> CAS No(1) -> UN No(2) 순차 검색으로 chemId 발급
+    2. getChemDetail01 ~ 16: chemId 기반 1~16번 항목 전체 텍스트 수집
+    """
+    base_url = "https://msds.kosha.or.kr/openapi/service/msdschem"
+    chem_id = None
+
+    # 국문명 -> CAS No -> UN No 순차 검색 시도
+    search_trials = [
+        (chem_name, "0"),
+        (cas_no, "1"),
+        (unno, "2")
+    ]
+
+    for search_wrd, search_cnd in search_trials:
+        if not search_wrd or search_wrd in ["-", "0000", "없음"]:
+            continue
+        
+        list_url = f"{base_url}/getChemList"
+        params = {
+            'serviceKey': PUBLIC_API_KEY,
+            'searchWrd': search_wrd.strip(),
+            'searchCnd': search_cnd,
+            'numOfRows': '1',
+            'pageNo': '1'
+        }
+        try:
+            res = requests.get(list_url, params=params, timeout=5)
+            root = ET.fromstring(res.content)
+            item = root.find('.//item')
+            if item is not None:
+                found_id = item.findtext('chemId') or item.findtext('chemId'.lower())
+                if found_id:
+                    chem_id = found_id.strip()
+                    break
+        except Exception as e:
+            print(f"KOSHA getChemList (cnd={search_cnd}) 에러: {e}")
+
+    if not chem_id:
+        return "안전보건공단 MSDS 연동 데이터 없음 (chemId 미발급)"
+
+    # 1~16번 세부 항목 전체 호출 수집
+    msds_details = []
+    for i in range(1, 17):
+        op_name = f"getChemDetail{i:02d}"
+        detail_url = f"{base_url}/{op_name}"
+        params = {'serviceKey': PUBLIC_API_KEY, 'chemId': chem_id}
+        try:
+            res = requests.get(detail_url, params=params, timeout=4)
+            root = ET.fromstring(res.content)
+            items = root.findall('.//item')
+            for item in items:
+                name_kor = item.findtext('msdsItemNameKor', '').strip()
+                detail_val = item.findtext('itemDetail', '').strip()
+                if detail_val and detail_val != "자료없음":
+                    msds_details.append(f"[{name_kor}] {detail_val}")
+        except Exception:
+            continue
+
+    if not msds_details:
+        return f"안전보건공단 MSDS 기본 정보 등록 (chemId: {chem_id})"
+
+    return f"[KOSHA MSDS chemId: {chem_id}]\n" + "\n".join(msds_details[:30]) # 주요 핵심 항목 위주 구성
+
 # ==========================================
 # 3. Gemini 자연어 매핑 및 AI 요약
 # ==========================================
@@ -401,7 +464,7 @@ def map_search_query_with_gemini(query_text):
     except Exception:
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
 
-def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info):
+def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text):
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
         
@@ -427,14 +490,15 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info):
 
         [화학물질안전원 안전관리정보 API 수집 데이터 (CAS NO: {cas_no})]
         - 일반 증상 및 표적장기: {safety_info.get('symptom', '-')}
-        - 흡입 영향: {safety_info.get('inhale', '-')}
-        - 피부 노출 영향: {safety_info.get('skin', '-')}
-        - 안구 노출 영향: {safety_info.get('eyeball', '-')}
-        - 경구 섭취 영향: {safety_info.get('oral', '-')}
+        - 흡입/피부/안구/경구 영향: {safety_info.get('inhale', '-')}, {safety_info.get('skin', '-')}, {safety_info.get('eyeball', '-')}, {safety_info.get('oral', '-')}
         - 기타 유의사항: {safety_info.get('etc', '-')}
 
+        [안전보건공단 MSDS 1~16번 종합 수집 데이터]
+        {kosha_msds_text}
+
         [작성 핵심 규칙]
-        ★ 최상단 핵심요약문은 **장황한 설명글을 절대 금지**하며, 현장 요원이 보고 1초만에 지시/전파할 수 있도록 **핵심 키워드, 수치(M단위), 구체적 단어 위주로 극도로 간결하게 표 형태로 작성**하세요.
+        1. 최상단 핵심요약문은 **장황한 설명글을 절대 금지**하며, 현장 요원이 보고 1초만에 지시/전파할 수 있도록 **핵심 키워드, 수치(M단위), 구체적 단어 위주로 극도로 간결하게 표 형태로 작성**하세요.
+        2. 하단의 1~4번 세부 지침 작성 시, 현장 요원이 즉시 조치할 수 있도록 **모든 항목을 반드시 개조식(-, •)의 명확하고 간결한 문장으로 나열**하여 작성하세요.
 
         --- 출력 형식을 엄격히 준수하세요 ---
 
@@ -571,7 +635,6 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_unno'] = unno
                             st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
-                            # 💡 기존 가이드 초기화 및 신규 요청 플래그 설정 후 즉시 갱신
                             st.session_state['active_summary'] = ""
                             st.session_state['active_key_changed'] = True
                             st.rerun()
@@ -586,14 +649,14 @@ if kcg_logo_b64:
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
             <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 솔루션</div>
         </div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 HNS 정보집 DB + Gemini AI 지능형 관제 시스템</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -623,13 +686,12 @@ if search_input:
                 st.session_state['active_unno'] = mapped_unno
                 st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
-                # 💡 기존 가이드 초기화 및 신규 요청 플래그 설정 후 즉시 갱신
                 st.session_state['active_summary'] = ""
                 st.session_state['active_key_changed'] = True
                 st.rerun()
 
 # ------------------------------------------
-# ⚡ AI 대응 가이드 출력 모달/컨테이너 (캐싱 보정)
+# ⚡ AI 대응 가이드 출력 모달/컨테이너
 # ------------------------------------------
 if 'active_chem' in st.session_state:
     st.divider()
@@ -640,12 +702,12 @@ if 'active_chem' in st.session_state:
     
     st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno} / CAS NO: {cas})")
     
-    # 💡 신규 생성 요청이거나 캐시된 요약 결과가 없을 때만 API & Gemini 1회 호출
     if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
-        with st.spinner('공공 API + 해경 HNS 정보집 + Gemini AI 가이드 생성 중...'):
+        with st.spinner('공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 HNS 정보집 DB + Gemini AI 가이드 생성 중...'):
             dgst_info = fetch_dgst_info(unno)
             safety_info = fetch_chem_safety_info(cas)
-            st.session_state['active_summary'] = generate_gemini_summary(chem, unno, cas, dgst_info, safety_info)
+            kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
+            st.session_state['active_summary'] = generate_gemini_summary(chem, unno, cas, dgst_info, safety_info, kosha_msds_text)
             st.session_state['active_key_changed'] = False
         
     st.markdown(st.session_state['active_summary'])
