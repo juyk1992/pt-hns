@@ -142,20 +142,33 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
-    /* Reflex 파란색 버튼 */
+    /* 💡 [수정] Reflex 파란색 버튼 및 내부 텍스트 흰색 강제 고정 */
     .stButton > button {
         border-radius: 12px !important;
         background-color: #3B82F6 !important;
-        color: #FFFFFF !important;
+        color: #FFFFFF !important;               /* 버튼 기본 글자색 흰색 고정 */
         border: none !important;
         font-weight: 600 !important;
         font-size: 0.9rem !important;
         padding: 0.5rem 1rem !important;
         box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25) !important;
+        transition: all 0.2s ease !important;
     }
 
-    .stButton > button:hover {
+    /* 버튼 내부 span, div, p 등 모든 하위 텍스트 요소를 흰색으로 강제 변경 */
+    .stButton > button * {
+        color: #FFFFFF !important;
+    }
+
+    /* 마우스 호버 / 터치 시 스타일 */
+    .stButton > button:hover, .stButton > button:active, .stButton > button:focus {
         background-color: #2563EB !important;
+        color: #FFFFFF !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
+    }
+
+    .stButton > button:hover * {
+        color: #FFFFFF !important;
     }
 
     /* 아코디언(Expander) UI 스타일링 */
