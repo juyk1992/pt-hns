@@ -69,24 +69,24 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [알약형 칩 2줄 가로 스크롤 컨테이너] 모바일 가독성 & 스압 완벽 해결 */
+    /* 💡 [CSS Grid 기반 2줄 고정 가로 스크롤] 데스크톱/모바일 완벽 동기화 */
     div[data-testid="stRadio"] > label {
         display: none !important;
     }
 
     div[data-testid="stRadio"] > div {
-        display: flex !important;
-        flex-direction: column !important;    /* 2줄 배치를 위한 세로 축 기준 설정 */
-        flex-wrap: wrap !important;           /* 2줄로 꺾이도록 설정 */
-        max-height: 96px !important;          /* 칩 2줄 높이에 딱 맞게 고정 */
-        overflow-x: auto !important;          /* 좌우 가로 스크롤 지원 */
-        overflow-y: hidden !important;        /* 세로 넘침 방지 */
-        padding-bottom: 8px !important;       /* 스크롤바 여백 */
+        display: grid !important;
+        grid-template-rows: repeat(2, 38px) !important; /* 무조건 완벽하게 2줄 고정 */
+        grid-auto-flow: column !important;               /* 오른쪽 방향으로 가로 배치 */
+        grid-auto-columns: max-content !important;        /* 칩 글자 길이에 맞춰 자동 폭 조정 */
         gap: 8px 8px !important;
-        -webkit-overflow-scrolling: touch !important; /* iOS 터치 부드러운 스크롤 */
+        overflow-x: auto !important;                      /* 좌우 가로 스크롤 */
+        overflow-y: hidden !important;
+        padding-bottom: 8px !important;
+        -webkit-overflow-scrolling: touch !important;
     }
 
-    /* 슬림 모바일 가로 스크롤바 디자인 */
+    /* 슬림 모바일/데스크톱 가로 스크롤바 디자인 */
     div[data-testid="stRadio"] > div::-webkit-scrollbar {
         height: 5px !important;
     }
@@ -99,10 +99,9 @@ st.markdown("""
         border-radius: 10px !important;
     }
 
-    /* 알약 버튼 개별 스타일 (고정 높이 및 좌우 스크롤 유지) */
+    /* 알약 버튼 개별 스타일 */
     div[data-testid="stRadio"] > div > label {
-        flex: 0 0 auto !important;
-        height: 38px !important;              /* 2줄 고정 높이 */
+        height: 38px !important;
         display: inline-flex !important;
         align-items: center !important;
         background-color: #FFFFFF !important;
