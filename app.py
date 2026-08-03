@@ -8,11 +8,14 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Reflex 스타일 Custom CSS
+# 0. 로컬 이미지 경로 지정 (깃허브 레포지토리 루트 기준)
 # ==========================================
+KCG_LOGO_PATH = "kcg_logo.png"
+
+# 페이지 설정 (파비콘에도 로컬 이미지 파일 연결)
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
-    page_icon="🚢",
+    page_icon=KCG_LOGO_PATH if os.path.exists(KCG_LOGO_PATH) else "🚢",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -539,13 +542,17 @@ def render_port_dashboard(port_name, port_code):
 # 6. 메인 화면 구성
 # ==========================================
 
-# Hero Container
-st.markdown("""
-<div class="hero-container">
-    <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-    <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>
-</div>
-""", unsafe_allow_html=True)
+# Hero Section 출력 부분
+col_logo, col_title = st.columns([1, 12])
+with col_logo:
+    if os.path.exists(KCG_LOGO_PATH):
+        st.image(KCG_LOGO_PATH, width=55)
+    else:
+        st.write("🚢")
+
+with col_title:
+    st.markdown('<div class="main-header">평택해양경찰서 HNS AI 대응 솔루션</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>', unsafe_allow_html=True)
 
 # ------------------------------------------
 # 🔥 [통합] HNS 화학물질 AI 스마트 매핑 검색창
