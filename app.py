@@ -34,7 +34,7 @@ st.markdown("""
         color: #0F172A !important;
     }
 
-    /* 상단 Hero 대시보드 카운터 (Reflex 둥근 대형 카드 스타일) */
+    /* 상단 Hero 대시보드 카운터 */
     .hero-container {
         padding: 2rem;
         background: #FFFFFF !important;
@@ -58,7 +58,7 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* Reflex 특유의 부드러운 둥근 보더 박스 (Reflex Card Style) */
+    /* Reflex 특유의 부드러운 둥근 보더 박스 */
     .reflex-card {
         background-color: #FFFFFF !important;
         border: 1px solid #E2E8F0 !important;
@@ -79,7 +79,7 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 텍스트 입력창 & 셀렉트박스 (모바일 터치 최적화 + 시각성 보장) */
+    /* 텍스트 입력창 & 셀렉트박스 */
     .stTextInput input, .stSelectbox [data-baseweb="select"] {
         background-color: #FFFFFF !important;
         border: 1px solid #CBD5E1 !important;
@@ -112,7 +112,7 @@ st.markdown("""
         transform: translateY(-1px);
     }
 
-    /* 아코디언(Expander) UI를 Reflex 카드로 스타일링 */
+    /* 아코디언(Expander) UI 스타일링 */
     .streamlit-expanderHeader {
         background-color: #FFFFFF !important;
         border-radius: 14px !important;
@@ -132,28 +132,44 @@ st.markdown("""
         padding: 1rem !important;
     }
 
-    /* 세련된 탭(Tabs) 스타일 */
+    /* 💡 [개선된 영역] 세련된 Reflex 스타일 탭(Tabs) 디자인 */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: transparent;
+        gap: 10px;
+        background-color: transparent !important;
+        border-bottom: 2px solid #E2E8F0 !important;
+        padding-bottom: 4px;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 42px;
-        background-color: #E2E8F0 !important;
-        border-radius: 10px !important;
-        color: #475569 !important;
+        height: 44px !important;
+        background-color: #F1F5F9 !important;
+        border-radius: 12px !important;
+        color: #64748B !important;
         font-weight: 600 !important;
-        padding: 0 16px !important;
-        border: none !important;
+        font-size: 0.95rem !important;
+        padding: 0 18px !important;
+        border: 1px solid #E2E8F0 !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #E2E8F0 !important;
+        color: #0F172A !important;
     }
 
     .stTabs [aria-selected="true"] {
-        background-color: #3B82F6 !important;
-        color: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #2563EB !important;
+        border: 1.5px solid #3B82F6 !important;
+        font-weight: 700 !important;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.12) !important;
     }
 
-    /* Alert / Info / Metric 박스 스타일링 보정 */
+    .stTabs [data-baseweb="tab-highlight"] {
+        display: none !important;
+    }
+
+    /* Alert / Metric 박스 스타일링 */
     .stAlert {
         border-radius: 12px !important;
     }
@@ -438,7 +454,7 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
 
 # ==========================================
-# 6. 메인 화면 구성 (Reflex Hero Section)
+# 6. 메인 화면 구성
 # ==========================================
 
 # Hero Container
