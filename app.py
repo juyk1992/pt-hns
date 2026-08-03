@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Custom CSS
+# 0. 페이지 설정 & Custom CSS (Streamlit Gallery 스타일)
 # ==========================================
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
@@ -17,49 +17,108 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS 적용
+# Modern Dark & Glassmorphism Custom CSS
 st.markdown("""
 <style>
-    /* 전체 배경 및 폰트 감성 적용 */
-    .stApp {
-        background-color: #0F172A;
-        color: #F8FAFC;
+    /* Google Fonts 로드 */
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700;800&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
     }
-    /* 타이틀 및 헤더 */
+
+    /* 전체 배경 */
+    .stApp {
+        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+        color: #f8fafc;
+    }
+
+    /* 메인 타이틀 & 브랜딩 */
+    .hero-container {
+        padding: 2.5rem 2rem;
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        margin-bottom: 2rem;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+    }
+    
     .main-header {
-        font-size: 2.2rem;
+        font-size: 2.4rem;
         font-weight: 800;
-        background: linear-gradient(90deg, #38BDF8, #818CF8);
+        background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        margin-bottom: 5px;
+        margin-bottom: 8px;
+        letter-spacing: -0.5px;
     }
+    
     .sub-header {
-        color: #94A3B8;
-        font-size: 1.0rem;
-        margin-bottom: 25px;
+        color: #94a3b8;
+        font-size: 1.05rem;
+        font-weight: 400;
     }
-    /* 배지 스타일 */
-    .badge-port {
-        background-color: #0284C7;
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-weight: bold;
-        font-size: 0.85rem;
+
+    /* 카드형 컨테이너 */
+    .glass-card {
+        background: rgba(30, 41, 59, 0.5);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
     }
+
+    /* 배지(Badge) 스타일 */
     .badge-unno {
-        background-color: #E11D48;
-        color: white;
-        padding: 2px 8px;
-        border-radius: 6px;
-        font-family: monospace;
-        font-weight: bold;
-    }
-    /* 버튼 스타일 통일 */
-    .stButton>button {
+        background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+        color: #ffffff;
+        padding: 3px 10px;
         border-radius: 8px;
-        font-weight: bold;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 700;
+        font-size: 0.85rem;
+        box-shadow: 0 2px 8px rgba(225, 29, 72, 0.4);
+    }
+
+    /* Streamlit 입력 폼 & Selectbox 모던화 */
+    .stTextInput > div > div > input {
+        background-color: rgba(15, 23, 42, 0.6) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 10px !important;
+        color: #f8fafc !important;
+    }
+
+    .stSelectbox > div > div {
+        background-color: rgba(15, 23, 42, 0.6) !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 10px !important;
+    }
+
+    /* 버튼 스타일 */
+    .stButton > button {
+        border-radius: 10px !important;
+        background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        font-weight: 600 !important;
+        transition: all 0.2s ease-in-out !important;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
+    }
+
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
+    }
+
+    /* Expander 모던 스타일링 */
+    .streamlit-expanderHeader {
+        background-color: rgba(30, 41, 59, 0.6) !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -81,7 +140,6 @@ def load_full_hns_db():
 full_hns_db = load_full_hns_db()
 
 def find_hns_raw_text(query):
-    """UN번호 또는 물질명으로 로컬 HNS 정보집 텍스트 추출"""
     if not full_hns_db or not query:
         return None
         
@@ -99,7 +157,6 @@ def find_hns_raw_text(query):
 # 2. 공공 API 연동 모듈
 # ==========================================
 def fetch_dgst_info(unno):
-    """해수부 위험물정보 API 상세 파싱"""
     url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
     params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
@@ -124,7 +181,6 @@ def fetch_dgst_info(unno):
     return info
 
 def fetch_chem_safety_info(chem_name):
-    """화학물질안전원 안전관리정보 API 상세 파싱"""
     url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
     clean_name = chem_name.split('(')[0].strip()
     params = {'serviceKey': PUBLIC_API_KEY, 'numOfRows': '3', 'pageNo': '1', 'chemKo': clean_name}
@@ -148,11 +204,10 @@ def fetch_chem_safety_info(chem_name):
     return safety_data
 
 # ==========================================
-# 3. Gemini 자연어 매핑 및 고속 AI 요약 모듈
+# 3. Gemini 자연어 매핑 및 AI 요약
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
-    """Gemini API로 다이렉트 자연어 매핑 (캐싱 적용)"""
     if not GEMINI_API_KEY or not query_text:
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000"}
 
@@ -183,7 +238,6 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
-        
         hns_raw_text = find_hns_raw_text(unno) or find_hns_raw_text(chem_name)
         hns_context = f"[해양경찰청 HNS 정보집 원본 문서 정보]\n{hns_raw_text}\n" if hns_raw_text else "[해양경찰청 HNS 정보집 정보]\n매칭 데이터 참조\n"
 
@@ -240,9 +294,9 @@ def generate_gemini_summary(chem_name, unno, dgst_info, safety_info):
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. 항구별 RPA 데이터 로드
+# 4. 항구별 RPA 데이터 로드 (30초 캐시)
 # ==========================================
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=30)
 def load_integrated_hns_data(port_code):
     filename_map = {
         "031": "hns_pyeongtaek_report.csv",
@@ -259,24 +313,22 @@ def load_integrated_hns_data(port_code):
     return None
 
 # ==========================================
-# 5. 항구별 데이터 렌더링 헬퍼 함수 (단일 선박 선택 드롭다운)
+# 5. 항구별 데이터 렌더링 헬퍼 함수
 # ==========================================
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
     today_str = kst_now.strftime("%Y-%m-%d")
     
-    # 데이터 로드
     df = load_integrated_hns_data(port_code)
 
     col_title, col_metric = st.columns([3, 1])
     with col_title:
-        st.subheader(f"📊 {port_name} 위험물 반입 현황")
+        st.markdown(f"#### 📊 {port_name} 위험물 반입 현황")
         st.caption(f"조회 기준일자: {today_str}")
 
     if df is None or df.empty:
-        st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 작동시켜 주세요.")
+        st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 가동해 주세요.")
     else:
-        # 💡 [단일 선택 드롭다운 적용]
         ship_column = "선박명(선택)" if "선박명(선택)" in df.columns else df.columns[0]
         unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
         ship_options = ["전체 보기"] + unique_ships
@@ -290,16 +342,14 @@ def render_port_dashboard(port_name, port_code):
                 key=f"select_ship_{port_code}"
             )
         
-        # 선택에 따른 데이터 필터링
         if selected_ship != "전체 보기":
             filtered_df = df[df[ship_column] == selected_ship]
         else:
             filtered_df = df
 
         with col_metric:
-            st.metric(label="조회된 위험물 신고 건수", value=f"{len(filtered_df)} 건")
+            st.metric(label="신고 및 적하 건수", value=f"{len(filtered_df)} 건")
 
-        # 전체 반입 신고 목록 Expander
         display_cols = [
             '선박명(선택)', '호출부호', '사용목적', '운송형태', '화물명', 
             '하역업체', '하역기간', '사용장소', '전출항지', 'UNNO', 'IMDG', '품명', '중량', '단위'
@@ -309,9 +359,8 @@ def render_port_dashboard(port_name, port_code):
             st.dataframe(filtered_df[[c for c in display_cols if c in filtered_df.columns]], use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.subheader(f"🚢 {port_name} 선박별 상세 운송 정보 및 지능형 비상 대응")
+        st.markdown(f"##### 🚢 {port_name} 선박별 상세 운송 정보 및 AI 비상 대응")
 
-        # 필터링된 선박별 카드 Expander UI
         for ship in filtered_df['선박명(선택)'].unique():
             ship_data = filtered_df[filtered_df['선박명(선택)'] == ship]
             call_sign = ship_data['호출부호'].iloc[0]
@@ -324,7 +373,7 @@ def render_port_dashboard(port_name, port_code):
             with st.expander(f"⚓ [{ship}] (호출부호: {call_sign}) ｜ 하역장소: {location} ｜ 기간: {work_period}"):
                 st.markdown(f"**🏢 하역업체:** {ship_data['하역업체'].iloc[0]} &nbsp;\|&nbsp; **사용목적:** {use_purpose} &nbsp;\|&nbsp; **운송형태:** {transport_type} &nbsp;\|&nbsp; **전출항지:** {prev_port}")
                 st.markdown("---")
-                st.markdown("##### 📦 적재 위험물 목록")
+                st.markdown("###### 📦 적재 위험물 목록")
                 
                 for idx, row in ship_data.iterrows():
                     unno = str(row['UNNO']).zfill(4) if pd.notna(row['UNNO']) else "0000"
@@ -338,7 +387,7 @@ def render_port_dashboard(port_name, port_code):
                     
                     c_info, c_btn = st.columns([4, 1])
                     with c_info:
-                        st.markdown(f"• <span class='badge-unno'>UN {unno}</span> &nbsp; **{chem_name}** &nbsp; (IMDG: {imdg} / 수량: {weight} {unit})", unsafe_allow_html=True)
+                        st.markdown(f"• <span class='badge-unno'>UN {unno}</span> &nbsp; **{chem_name}** &nbsp; <span style='color:#94a3b8;'>(IMDG: {imdg} / 수량: {weight} {unit})</span>", unsafe_allow_html=True)
                     with c_btn:
                         button_key = f"btn_{port_code}_{ship}_{idx}_{unno}"
                         if st.button("🤖 AI 가이드 생성", key=button_key, use_container_width=True):
@@ -347,15 +396,19 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
 
 # ==========================================
-# 6. 메인 화면 구성
+# 6. 메인 화면 구성 (Hero Section 적용)
 # ==========================================
 
-# 메인 타이틀
-st.markdown('<div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">포트미스 + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>', unsafe_allow_html=True)
+# Hero Container (Glassmorphism Header)
+st.markdown("""
+<div class="hero-container">
+    <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
+    <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS DB + Gemini AI 지능형 관제 시스템</div>
+</div>
+""", unsafe_allow_html=True)
 
 # ------------------------------------------
-# 🔥 [통합] HNS 화학물질 AI 스마트 매핑 검색창 (항 구분 없음)
+# 🔥 [통합] HNS 화학물질 AI 스마트 매핑 검색창
 # ------------------------------------------
 st.markdown("### 🔎 화학물질 AI 스마트 검색")
 search_input = st.text_input(
@@ -379,7 +432,7 @@ if search_input:
                 st.session_state['active_unno'] = mapped_unno
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
 
-# AI 대응 가이드 출력 모달/컨테이너 (통합 검색 및 선박 클릭 공용)
+# AI 대응 가이드 출력 모달/컨테이너
 if 'active_chem' in st.session_state:
     st.divider()
     chem = st.session_state['active_chem']
@@ -391,7 +444,6 @@ if 'active_chem' in st.session_state:
     with st.spinner('공공 API + 해경 HNS 정보집 + Gemini AI 가이드 생성 중...'):
         dgst_info = fetch_dgst_info(unno)
         safety_info = fetch_chem_safety_info(chem)
-        
         ai_summary = generate_gemini_summary(chem, unno, dgst_info, safety_info)
         
     st.markdown(ai_summary)
