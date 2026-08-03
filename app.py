@@ -573,6 +573,7 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_unno'] = unno
                             st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
+                            st.rerun()
 
 # ==========================================
 # 6. 메인 화면 구성 (Hero Section & 로고 정렬)
@@ -621,6 +622,7 @@ if search_input:
                 st.session_state['active_unno'] = mapped_unno
                 st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
+                st.rerun()
 
 # AI 대응 가이드 출력 모달/컨테이너
 if 'active_chem' in st.session_state:
