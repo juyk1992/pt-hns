@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Custom CSS (Streamlit Gallery 스타일)
+# 0. 페이지 설정 & Custom CSS (Snowflake Light Theme 스타일)
 # ==========================================
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
@@ -17,108 +17,119 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Modern Dark & Glassmorphism Custom CSS
+# Snowflake Cheat Sheet 스타일 Light CSS 적용
 st.markdown("""
 <style>
-    /* Google Fonts 로드 */
-    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
     }
 
-    /* 전체 배경 */
+    /* 1. 깨끗한 흰색 배경 및 짙은 텍스트 */
     .stApp {
-        background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-        color: #f8fafc;
+        background-color: #FFFFFF;
+        color: #0F172A;
     }
 
-    /* 메인 타이틀 & 브랜딩 */
+    /* 2. 상단 헤더 섹션 */
     .hero-container {
-        padding: 2.5rem 2rem;
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 20px;
-        margin-bottom: 2rem;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        padding: 1.8rem 2rem;
+        background-color: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
     }
     
     .main-header {
-        font-size: 2.4rem;
+        font-size: 2.2rem;
         font-weight: 800;
-        background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 8px;
+        color: #0284C7; /* Snowflake 하늘색 톤 */
+        margin-bottom: 4px;
         letter-spacing: -0.5px;
     }
     
     .sub-header {
-        color: #94a3b8;
-        font-size: 1.05rem;
-        font-weight: 400;
+        color: #64748B;
+        font-size: 1.0rem;
+        font-weight: 500;
     }
 
-    /* 카드형 컨테이너 */
-    .glass-card {
-        background: rgba(30, 41, 59, 0.5);
-        backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 16px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2);
+    /* 3. 카드 박스 (이미지의 코드 박스 스타일) */
+    .light-card {
+        background-color: #F8FAFC;
+        border: 1px solid #E2E8F0;
+        border-radius: 10px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
     }
 
-    /* 배지(Badge) 스타일 */
+    /* 4. 배지(Badge) 스타일 */
     .badge-unno {
-        background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
-        color: #ffffff;
-        padding: 3px 10px;
-        border-radius: 8px;
-        font-family: 'JetBrains Mono', monospace;
+        background-color: #FF4D4D; /* Snowflake Red 포인트 */
+        color: #FFFFFF;
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-family: monospace;
         font-weight: 700;
         font-size: 0.85rem;
-        box-shadow: 0 2px 8px rgba(225, 29, 72, 0.4);
     }
 
-    /* Streamlit 입력 폼 & Selectbox 모던화 */
+    /* 5. 입력창 및 셀렉트박스 라이트 모드 */
     .stTextInput > div > div > input {
-        background-color: rgba(15, 23, 42, 0.6) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        border-radius: 10px !important;
-        color: #f8fafc !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 8px !important;
+        color: #0F172A !important;
     }
 
     .stSelectbox > div > div {
-        background-color: rgba(15, 23, 42, 0.6) !important;
-        border: 1px solid rgba(255, 255, 255, 0.15) !important;
-        border-radius: 10px !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 8px !important;
+        color: #0F172A !important;
     }
 
-    /* 버튼 스타일 */
+    /* 6. 버튼 스타일 (시원한 파란색) */
     .stButton > button {
-        border-radius: 10px !important;
-        background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%) !important;
-        color: #ffffff !important;
+        border-radius: 8px !important;
+        background-color: #0284C7 !important;
+        color: #FFFFFF !important;
         border: none !important;
         font-weight: 600 !important;
-        transition: all 0.2s ease-in-out !important;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
+        transition: all 0.15s ease-in-out !important;
     }
 
     .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
+        background-color: #0369A1 !important;
     }
 
-    /* Expander 모던 스타일링 */
+    /* 7. Expander (아코디언) 라이트 스타일 */
     .streamlit-expanderHeader {
-        background-color: rgba(30, 41, 59, 0.6) !important;
-        border-radius: 12px !important;
-        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        background-color: #F1F5F9 !important;
+        border-radius: 8px !important;
+        border: 1px solid #E2E8F0 !important;
+        color: #0F172A !important;
+        font-weight: 600 !important;
+    }
+
+    /* Tab 스타일 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        white-space: pre-wrap;
+        background-color: #F1F5F9;
+        border-radius: 8px 8px 0px 0px;
+        color: #475569;
+        font-weight: 600;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #0284C7 !important;
+        color: white !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -204,7 +215,7 @@ def fetch_chem_safety_info(chem_name):
     return safety_data
 
 # ==========================================
-# 3. Gemini 자연어 매핑 및 AI 요약
+# 3. Gemini 자연어 매핑 및 AI 요약 모듈
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
@@ -387,7 +398,7 @@ def render_port_dashboard(port_name, port_code):
                     
                     c_info, c_btn = st.columns([4, 1])
                     with c_info:
-                        st.markdown(f"• <span class='badge-unno'>UN {unno}</span> &nbsp; **{chem_name}** &nbsp; <span style='color:#94a3b8;'>(IMDG: {imdg} / 수량: {weight} {unit})</span>", unsafe_allow_html=True)
+                        st.markdown(f"• <span class='badge-unno'>UN {unno}</span> &nbsp; **{chem_name}** &nbsp; <span style='color:#64748B;'>(IMDG: {imdg} / 수량: {weight} {unit})</span>", unsafe_allow_html=True)
                     with c_btn:
                         button_key = f"btn_{port_code}_{ship}_{idx}_{unno}"
                         if st.button("🤖 AI 가이드 생성", key=button_key, use_container_width=True):
@@ -396,10 +407,10 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
 
 # ==========================================
-# 6. 메인 화면 구성 (Hero Section 적용)
+# 6. 메인 화면 구성
 # ==========================================
 
-# Hero Container (Glassmorphism Header)
+# Hero Container (Light Card Style)
 st.markdown("""
 <div class="hero-container">
     <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
