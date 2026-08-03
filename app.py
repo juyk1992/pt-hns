@@ -22,43 +22,86 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
 
-    /* [핵심] 모바일/다크모드 강제 오버라이드 및 기본 폰트 설정 */
+    /* ==========================================
+       1. 기본 라이트 모드 테마 변수 정의
+       ========================================== */
+    :root {
+        --bg-main: #F8FAFC;
+        --bg-card: #FFFFFF;
+        --bg-sub: #F1F5F9;
+        --text-main: #0F172A;
+        --text-sub: #64748B;
+        --border-color: #E2E8F0;
+        --accent-blue: #3B82F6;
+        --accent-blue-hover: #2563EB;
+    }
+
+    /* ==========================================
+       2. 다크 모드 자동 감지 및 변수 재정의
+       ========================================== */
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg-main: #0F172A;
+            --bg-card: #1E293B;
+            --bg-sub: #334155;
+            --text-main: #F8FAFC;
+            --text-sub: #94A3B8;
+            --border-color: #334155;
+            --accent-blue: #60A5FA;
+            --accent-blue-hover: #3B82F6;
+        }
+    }
+
+    /* Streamlit 테마 설정이 다크일 때도 강제 반영 */
+    [data-theme="dark"] {
+        --bg-main: #0F172A;
+        --bg-card: #1E293B;
+        --bg-sub: #334155;
+        --text-main: #F8FAFC;
+        --text-sub: #94A3B8;
+        --border-color: #334155;
+        --accent-blue: #60A5FA;
+        --accent-blue-hover: #3B82F6;
+    }
+
+    /* ==========================================
+       3. 동적 변수 기반 글로벌 스타일 적용
+       ========================================== */
     html, body, [class*="css"], .stApp {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
-        background-color: #F8FAFC !important;
-        color: #0F172A !important;
+        background-color: var(--bg-main) !important;
+        color: var(--text-main) !important;
     }
 
-    /* Streamlit 기본 모바일 다크모드 텍스트 반전 방지 */
     p, span, div, label, h1, h2, h3, h4, h5, h6 {
-        color: #0F172A !important;
+        color: var(--text-main) !important;
     }
 
-    /* 상단 Hero 대시보드 카운터 */
+    /* Hero 컨테이너 */
     .hero-container {
         padding: 2rem;
-        background: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
+        background: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 20px !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05) !important;
         margin-bottom: 1.5rem;
     }
     
     .main-header {
         font-size: 2.1rem;
         font-weight: 800;
-        color: #0F172A !important;
+        color: var(--text-main) !important;
         letter-spacing: -0.5px;
         margin-bottom: 6px;
     }
     
     .sub-header {
-        color: #64748B !important;
+        color: var(--text-sub) !important;
         font-size: 0.95rem;
         font-weight: 500;
     }
 
-    /* UNNO 및 IMDG 배지 스타일 */
+    /* UNNO 배지 */
     .badge-unno {
         background-color: #EF4444 !important;
         color: #FFFFFF !important;
@@ -69,43 +112,60 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [라디오 버튼 칩(Chip) 스타일링] 모바일 다크모드 영향 0% 구현 */
+    /* 2줄 고정 가로 스크롤 선박 칩(Radio) */
     div[data-testid="stRadio"] > label {
-        display: none !important; /* 라디오 기본 라벨 숨김 */
+        display: none !important;
     }
 
     div[data-testid="stRadio"] > div {
-        display: flex !important;
-        flex-wrap: wrap !important;
-        gap: 8px !important;
-        background-color: transparent !important;
+        display: grid !important;
+        grid-template-rows: repeat(2, 38px) !important;
+        grid-auto-flow: column !important;
+        grid-auto-columns: max-content !important;
+        gap: 8px 8px !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        padding-bottom: 8px !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    div[data-testid="stRadio"] > div::-webkit-scrollbar {
+        height: 5px !important;
+    }
+    div[data-testid="stRadio"] > div::-webkit-scrollbar-track {
+        background: var(--bg-sub) !important;
+        border-radius: 10px !important;
+    }
+    div[data-testid="stRadio"] > div::-webkit-scrollbar-thumb {
+        background: var(--border-color) !important;
+        border-radius: 10px !important;
     }
 
     div[data-testid="stRadio"] > div > label {
-        background-color: #FFFFFF !important;
-        border: 1.5px solid #CBD5E1 !important;
-        border-radius: 20px !important; /* 둥근 알약 스타일 */
-        padding: 6px 16px !important;
-        color: #0F172A !important;
+        height: 38px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        background-color: var(--bg-card) !important;
+        border: 1.5px solid var(--border-color) !important;
+        border-radius: 20px !important;
+        padding: 0 16px !important;
+        color: var(--text-main) !important;
         font-weight: 600 !important;
-        font-size: 0.9rem !important;
+        font-size: 0.88rem !important;
         cursor: pointer !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        transition: all 0.2s ease !important;
+        white-space: nowrap !important;
     }
 
-    /* 라디오 원형 체크 아이콘 숨기기 (알약 버튼처럼 보이도록) */
     div[data-testid="stRadio"] > div > label > div:first-child {
         display: none !important;
     }
 
-    /* 선택된 칩 버튼 강조 */
+    /* 선택된 칩 */
     div[data-testid="stRadio"] > div > label[data-checked="true"],
     div[data-testid="stRadio"] > div > label:has(input:checked) {
-        background-color: #3B82F6 !important;
-        border-color: #2563EB !important;
+        background-color: var(--accent-blue) !important;
+        border-color: var(--accent-blue) !important;
         color: #FFFFFF !important;
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3) !important;
     }
 
     div[data-testid="stRadio"] > div > label[data-checked="true"] *,
@@ -113,73 +173,78 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    /* 텍스트 입력창 */
+    /* 입력창 */
     .stTextInput input {
-        background-color: #FFFFFF !important;
-        border: 1px solid #CBD5E1 !important;
+        background-color: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 12px !important;
-        color: #0F172A !important;
+        color: var(--text-main) !important;
         font-weight: 600 !important;
     }
 
-    /* Reflex 파란색 버튼 */
+    /* 버튼 */
     .stButton > button {
         border-radius: 12px !important;
-        background-color: #3B82F6 !important;
+        background-color: var(--accent-blue) !important;
         color: #FFFFFF !important;
         border: none !important;
         font-weight: 600 !important;
         font-size: 0.9rem !important;
         padding: 0.5rem 1rem !important;
-        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25) !important;
+        transition: all 0.2s ease !important;
     }
 
-    .stButton > button:hover {
-        background-color: #2563EB !important;
+    .stButton > button * {
+        color: #FFFFFF !important;
     }
 
-    /* 아코디언(Expander) UI 스타일링 */
+    .stButton > button:hover, .stButton > button:active {
+        background-color: var(--accent-blue-hover) !important;
+        color: #FFFFFF !important;
+    }
+
+    /* Expander(아코디언) */
     .streamlit-expanderHeader {
-        background-color: #FFFFFF !important;
+        background-color: var(--bg-card) !important;
         border-radius: 14px !important;
-        border: 1px solid #E2E8F0 !important;
-        color: #0F172A !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--text-main) !important;
         font-weight: 700 !important;
         padding: 0.8rem 1rem !important;
     }
 
     .streamlit-expanderContent {
-        background-color: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
+        background-color: var(--bg-card) !important;
+        border: 1px solid var(--border-color) !important;
         border-top: none !important;
         border-bottom-left-radius: 14px !important;
         border-bottom-right-radius: 14px !important;
         padding: 1rem !important;
     }
 
-    /* 세련된 Reflex 스타일 탭(Tabs) 디자인 */
+    /* 탭(Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
         background-color: transparent !important;
-        border-bottom: 2px solid #E2E8F0 !important;
+        border-bottom: 2px solid var(--border-color) !important;
         padding-bottom: 4px;
     }
 
     .stTabs [data-baseweb="tab"] {
         height: 44px !important;
-        background-color: #F1F5F9 !important;
+        background-color: var(--bg-sub) !important;
         border-radius: 12px !important;
-        color: #64748B !important;
+        color: var(--text-sub) !important;
         font-weight: 600 !important;
         font-size: 0.95rem !important;
         padding: 0 18px !important;
-        border: 1px solid #E2E8F0 !important;
+        border: 1px solid var(--border-color) !important;
     }
 
     .stTabs [aria-selected="true"] {
-        background-color: #FFFFFF !important;
-        color: #2563EB !important;
-        border: 1.5px solid #3B82F6 !important;
+        background-color: var(--bg-card) !important;
+        color: var(--accent-blue) !important;
+        border: 1.5px solid var(--accent-blue) !important;
         font-weight: 700 !important;
     }
 
@@ -188,7 +253,7 @@ st.markdown("""
     }
 
     [data-testid="stMetricValue"] {
-        color: #3B82F6 !important;
+        color: var(--accent-blue) !important;
         font-weight: 800 !important;
     }
 </style>
@@ -389,22 +454,23 @@ def load_integrated_hns_data(port_code):
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
     today_str = kst_now.strftime("%Y-%m-%d")
+    from_str = (kst_now - timedelta(days=3)).strftime("%Y-%m-%d")
     
     df = load_integrated_hns_data(port_code)
 
     col_title, col_metric = st.columns([3, 1])
     with col_title:
         st.markdown(f"#### 📊 {port_name} 위험물 반입 현황")
-        st.caption(f"조회 기준일자: {today_str}")
+        # 💡 [변경] '조회 기준일자' -> '조회기간 (오늘-3일 ~ 오늘)'
+        st.caption(f"조회기간: {from_str} ~ {today_str}")
 
     if df is None or df.empty:
-        st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 가동해 주세요.")
+        st.warning(f"⚠️ {port_name}의 {from_str} ~ {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 가동해 주세요.")
     else:
         ship_column = "선박명(선택)" if "선박명(선택)" in df.columns else df.columns[0]
         unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
         ship_options = ["전체 보기"] + unique_ships
         
-        # 💡 [핵심 변경] 드롭다운 팝업 대신 알약형 칩(Chip) 라디오 버튼으로 변경
         st.markdown(f"**🚢 [{port_name}] 조회할 선박 선택**")
         selected_ship = st.radio(
             label=f"ship_radio_{port_code}",
@@ -421,7 +487,8 @@ def render_port_dashboard(port_name, port_code):
             filtered_df = df
 
         with col_metric:
-            st.metric(label="신고 및 적하 건수", value=f"{len(filtered_df)} 건")
+            # 💡 [변경] '신고 및 적하 건수' -> '반입 신고 건수'
+            st.metric(label="반입 신고 건수", value=f"{len(filtered_df)} 건")
 
         display_cols = [
             '선박명(선택)', '호출부호', '사용목적', '운송형태', '화물명', 
@@ -467,7 +534,7 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_chem'] = chem_name
                             st.session_state['active_unno'] = unno
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
-
+                            
 # ==========================================
 # 6. 메인 화면 구성
 # ==========================================
