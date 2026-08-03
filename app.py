@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Custom CSS (Snowflake Light Theme 스타일)
+# 0. 페이지 설정 & Reflex 스타일 Custom CSS
 # ==========================================
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
@@ -17,119 +17,150 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Snowflake Cheat Sheet 스타일 Light CSS 적용
+# Reflex.dev 감성 Light UI + 모바일 가독성 완벽 보정 CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    /* [핵심] 모바일/다크모드 강제 오버라이드 및 기본 폰트 설정 */
+    html, body, [class*="css"], .stApp {
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
+        background-color: #F8FAFC !important; /* 부드러운 Off-White 배경 */
+        color: #0F172A !important;             /* 가독성 최상 짙은 슬레이트 컬러 */
     }
 
-    /* 1. 깨끗한 흰색 배경 및 짙은 텍스트 */
-    .stApp {
-        background-color: #FFFFFF;
-        color: #0F172A;
+    /* Streamlit 기본 모바일 다크모드 텍스트 반전 방지 */
+    p, span, div, label, h1, h2, h3, h4, h5, h6 {
+        color: #0F172A !important;
     }
 
-    /* 2. 상단 헤더 섹션 */
+    /* 상단 Hero 대시보드 카운터 (Reflex 둥근 대형 카드 스타일) */
     .hero-container {
-        padding: 1.8rem 2rem;
-        background-color: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 12px;
+        padding: 2rem;
+        background: #FFFFFF !important;
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 20px !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03) !important;
         margin-bottom: 1.5rem;
     }
     
     .main-header {
-        font-size: 2.2rem;
+        font-size: 2.1rem;
         font-weight: 800;
-        color: #0284C7; /* Snowflake 하늘색 톤 */
-        margin-bottom: 4px;
+        color: #0F172A !important;
         letter-spacing: -0.5px;
+        margin-bottom: 6px;
     }
     
     .sub-header {
-        color: #64748B;
-        font-size: 1.0rem;
+        color: #64748B !important;
+        font-size: 0.95rem;
         font-weight: 500;
     }
 
-    /* 3. 카드 박스 (이미지의 코드 박스 스타일) */
-    .light-card {
-        background-color: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 1.2rem;
+    /* Reflex 특유의 부드러운 둥근 보더 박스 (Reflex Card Style) */
+    .reflex-card {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 16px !important;
+        padding: 1.25rem !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02) !important;
         margin-bottom: 1rem;
     }
 
-    /* 4. 배지(Badge) 스타일 */
+    /* UNNO 및 IMDG 배지 스타일 */
     .badge-unno {
-        background-color: #FF4D4D; /* Snowflake Red 포인트 */
-        color: #FFFFFF;
-        padding: 2px 8px;
-        border-radius: 6px;
+        background-color: #EF4444 !important;
+        color: #FFFFFF !important;
+        padding: 3px 9px;
+        border-radius: 8px;
         font-family: monospace;
         font-weight: 700;
         font-size: 0.85rem;
     }
 
-    /* 5. 입력창 및 셀렉트박스 라이트 모드 */
-    .stTextInput > div > div > input {
+    /* 텍스트 입력창 & 셀렉트박스 (모바일 터치 최적화 + 시각성 보장) */
+    .stTextInput input, .stSelectbox [data-baseweb="select"] {
         background-color: #FFFFFF !important;
         border: 1px solid #CBD5E1 !important;
-        border-radius: 8px !important;
+        border-radius: 12px !important;
         color: #0F172A !important;
+        font-weight: 500 !important;
+        font-size: 0.95rem !important;
+        padding: 0.6rem 0.8rem !important;
     }
 
-    .stSelectbox > div > div {
-        background-color: #FFFFFF !important;
-        border: 1px solid #CBD5E1 !important;
-        border-radius: 8px !important;
-        color: #0F172A !important;
+    .stTextInput input::placeholder {
+        color: #94A3B8 !important;
     }
 
-    /* 6. 버튼 스타일 (시원한 파란색) */
+    /* Reflex 시그니처 파란색 모던 버튼 */
     .stButton > button {
-        border-radius: 8px !important;
-        background-color: #0284C7 !important;
+        border-radius: 12px !important;
+        background-color: #3B82F6 !important;
         color: #FFFFFF !important;
         border: none !important;
         font-weight: 600 !important;
-        transition: all 0.15s ease-in-out !important;
+        font-size: 0.9rem !important;
+        padding: 0.5rem 1rem !important;
+        box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25) !important;
+        transition: all 0.2s ease !important;
     }
 
     .stButton > button:hover {
-        background-color: #0369A1 !important;
+        background-color: #2563EB !important;
+        transform: translateY(-1px);
     }
 
-    /* 7. Expander (아코디언) 라이트 스타일 */
+    /* 아코디언(Expander) UI를 Reflex 카드로 스타일링 */
     .streamlit-expanderHeader {
-        background-color: #F1F5F9 !important;
-        border-radius: 8px !important;
+        background-color: #FFFFFF !important;
+        border-radius: 14px !important;
         border: 1px solid #E2E8F0 !important;
         color: #0F172A !important;
-        font-weight: 600 !important;
+        font-weight: 700 !important;
+        padding: 0.8rem 1rem !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02) !important;
     }
 
-    /* Tab 스타일 */
+    .streamlit-expanderContent {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E2E8F0 !important;
+        border-top: none !important;
+        border-bottom-left-radius: 14px !important;
+        border-bottom-right-radius: 14px !important;
+        padding: 1rem !important;
+    }
+
+    /* 세련된 탭(Tabs) 스타일 */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
+        background-color: transparent;
     }
 
     .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        white-space: pre-wrap;
-        background-color: #F1F5F9;
-        border-radius: 8px 8px 0px 0px;
-        color: #475569;
-        font-weight: 600;
+        height: 42px;
+        background-color: #E2E8F0 !important;
+        border-radius: 10px !important;
+        color: #475569 !important;
+        font-weight: 600 !important;
+        padding: 0 16px !important;
+        border: none !important;
     }
 
     .stTabs [aria-selected="true"] {
-        background-color: #0284C7 !important;
-        color: white !important;
+        background-color: #3B82F6 !important;
+        color: #FFFFFF !important;
+    }
+
+    /* Alert / Info / Metric 박스 스타일링 보정 */
+    .stAlert {
+        border-radius: 12px !important;
+    }
+    
+    [data-testid="stMetricValue"] {
+        color: #3B82F6 !important;
+        font-weight: 800 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -215,7 +246,7 @@ def fetch_chem_safety_info(chem_name):
     return safety_data
 
 # ==========================================
-# 3. Gemini 자연어 매핑 및 AI 요약 모듈
+# 3. Gemini 자연어 매핑 및 AI 요약
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
@@ -407,10 +438,10 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
 
 # ==========================================
-# 6. 메인 화면 구성
+# 6. 메인 화면 구성 (Reflex Hero Section)
 # ==========================================
 
-# Hero Container (Light Card Style)
+# Hero Container
 st.markdown("""
 <div class="hero-container">
     <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
