@@ -69,22 +69,24 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [알약형 칩 가로 스크롤 컨테이너] 모바일 스압 방지 처리 */
+    /* 💡 [알약형 칩 2줄 가로 스크롤 컨테이너] 모바일 가독성 & 스압 완벽 해결 */
     div[data-testid="stRadio"] > label {
         display: none !important;
     }
 
     div[data-testid="stRadio"] > div {
         display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;        /* 줄바꿈 금지 (한 줄로 배치) */
-        overflow-x: auto !important;          /* 좌우 가로 스크롤 허용 */
+        flex-direction: column !important;    /* 2줄 배치를 위한 세로 축 기준 설정 */
+        flex-wrap: wrap !important;           /* 2줄로 꺾이도록 설정 */
+        max-height: 96px !important;          /* 칩 2줄 높이에 딱 맞게 고정 */
+        overflow-x: auto !important;          /* 좌우 가로 스크롤 지원 */
+        overflow-y: hidden !important;        /* 세로 넘침 방지 */
         padding-bottom: 8px !important;       /* 스크롤바 여백 */
-        gap: 8px !important;
-        -webkit-overflow-scrolling: touch !important; /* iOS 모바일 부드러운 스크롤 */
+        gap: 8px 8px !important;
+        -webkit-overflow-scrolling: touch !important; /* iOS 터치 부드러운 스크롤 */
     }
 
-    /* 모바일 가로 스크롤바 디자인 (얇고 세련되게) */
+    /* 슬림 모바일 가로 스크롤바 디자인 */
     div[data-testid="stRadio"] > div::-webkit-scrollbar {
         height: 5px !important;
     }
@@ -97,19 +99,22 @@ st.markdown("""
         border-radius: 10px !important;
     }
 
-    /* 알약 버튼 개별 스타일 (줄바꿈 없이 고정 폭 유지) */
+    /* 알약 버튼 개별 스타일 (고정 높이 및 좌우 스크롤 유지) */
     div[data-testid="stRadio"] > div > label {
-        flex: 0 0 auto !important;           /* 칩 크기가 찌그러지지 않도록 고정 */
+        flex: 0 0 auto !important;
+        height: 38px !important;              /* 2줄 고정 높이 */
+        display: inline-flex !important;
+        align-items: center !important;
         background-color: #FFFFFF !important;
         border: 1.5px solid #CBD5E1 !important;
         border-radius: 20px !important;
-        padding: 6px 16px !important;
+        padding: 0 16px !important;
         color: #0F172A !important;
         font-weight: 600 !important;
-        font-size: 0.9rem !important;
+        font-size: 0.88rem !important;
         cursor: pointer !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        white-space: nowrap !important;       /* 글자 줄바꿈 방지 */
+        white-space: nowrap !important;
     }
 
     div[data-testid="stRadio"] > div > label > div:first-child {
