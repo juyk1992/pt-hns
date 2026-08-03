@@ -409,22 +409,23 @@ def load_integrated_hns_data(port_code):
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
     today_str = kst_now.strftime("%Y-%m-%d")
+    from_str = (kst_now - timedelta(days=3)).strftime("%Y-%m-%d")
     
     df = load_integrated_hns_data(port_code)
 
     col_title, col_metric = st.columns([3, 1])
     with col_title:
         st.markdown(f"#### 📊 {port_name} 위험물 반입 현황")
-        st.caption(f"조회 기준일자: {today_str}")
+        # 💡 [변경] '조회 기준일자' -> '조회기간 (오늘-3일 ~ 오늘)'
+        st.caption(f"조회기간: {from_str} ~ {today_str}")
 
     if df is None or df.empty:
-        st.warning(f"⚠️ {port_name}의 {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 가동해 주세요.")
+        st.warning(f"⚠️ {port_name}의 {from_str} ~ {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 가동해 주세요.")
     else:
         ship_column = "선박명(선택)" if "선박명(선택)" in df.columns else df.columns[0]
         unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
         ship_options = ["전체 보기"] + unique_ships
         
-        # 💡 [핵심 변경] 드롭다운 팝업 대신 알약형 칩(Chip) 라디오 버튼으로 변경
         st.markdown(f"**🚢 [{port_name}] 조회할 선박 선택**")
         selected_ship = st.radio(
             label=f"ship_radio_{port_code}",
@@ -441,7 +442,8 @@ def render_port_dashboard(port_name, port_code):
             filtered_df = df
 
         with col_metric:
-            st.metric(label="신고 및 적하 건수", value=f"{len(filtered_df)} 건")
+            # 💡 [변경] '신고 및 적하 건수' -> '반입 신고 건수'
+            st.metric(label="반입 신고 건수", value=f"{len(filtered_df)} 건")
 
         display_cols = [
             '선박명(선택)', '호출부호', '사용목적', '운송형태', '화물명', 
@@ -487,7 +489,7 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_chem'] = chem_name
                             st.session_state['active_unno'] = unno
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
-
+                            
 # ==========================================
 # 6. 메인 화면 구성
 # ==========================================
