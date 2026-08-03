@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from google import genai
 
 # ==========================================
-# 0. 페이지 설정 & Reflex 스타일 Custom CSS
+# 0. 페이지 설정 & Reflex 스타일 Custom CSS (모바일 다크모드 드롭다운 완벽 보정)
 # ==========================================
 st.set_page_config(
     page_title="평택해양경찰서 HNS AI 대응 시스템",
@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Reflex.dev 감성 Light UI + 모바일 다크모드 완벽 대응 CSS
+# Reflex.dev 감성 Light UI + 모바일 다크모드 드롭다운 완벽 보정 CSS
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
@@ -25,8 +25,8 @@ st.markdown("""
     /* [핵심] 모바일/다크모드 강제 오버라이드 및 기본 폰트 설정 */
     html, body, [class*="css"], .stApp {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
-        background-color: #F8FAFC !important; /* 부드러운 Off-White 배경 */
-        color: #0F172A !important;             /* 가독성 최상 짙은 슬레이트 컬러 */
+        background-color: #F8FAFC !important;
+        color: #0F172A !important;
     }
 
     /* Streamlit 기본 모바일 다크모드 텍스트 반전 방지 */
@@ -58,16 +58,6 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* Reflex 특유의 부드러운 둥근 보더 박스 */
-    .reflex-card {
-        background-color: #FFFFFF !important;
-        border: 1px solid #E2E8F0 !important;
-        border-radius: 16px !important;
-        padding: 1.25rem !important;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02) !important;
-        margin-bottom: 1rem;
-    }
-
     /* UNNO 및 IMDG 배지 스타일 */
     .badge-unno {
         background-color: #EF4444 !important;
@@ -79,43 +69,34 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [핵심 보정] 다크모드 모바일용 Selectbox & Dropdown Popover 스타일 고정 */
+    /* 💡 [핵심 보정] 모바일 다크모드 Selectbox 드롭다운 팝업 텍스트/배경색 강제 고정 */
     .stTextInput input, .stSelectbox [data-baseweb="select"] {
         background-color: #FFFFFF !important;
         border: 1px solid #CBD5E1 !important;
         border-radius: 12px !important;
         color: #0F172A !important;
         font-weight: 600 !important;
-        font-size: 0.95rem !important;
-        padding: 0.6rem 0.8rem !important;
     }
 
-    .stTextInput input::placeholder {
-        color: #94A3B8 !important;
-    }
-
-    /* Selectbox 드롭다운 팝업 메뉴 전체 가독성 강제 보정 */
-    div[data-baseweb="popover"], div[data-baseweb="menu"], ul[role="listbox"] {
+    /* 모바일 다크모드에서 펼쳐지는 드롭다운 메뉴 레이어 강제 밝은 배경 & 짙은 글자 고정 */
+    div[data-baseweb="popover"],
+    div[data-baseweb="popover"] *,
+    div[data-baseweb="menu"],
+    div[data-baseweb="menu"] *,
+    ul[role="listbox"],
+    ul[role="listbox"] * {
         background-color: #FFFFFF !important;
-        border: 1px solid #CBD5E1 !important;
-        border-radius: 12px !important;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
-    }
-
-    /* 드롭다운 개별 옵션 항목 텍스트 & 배경색 */
-    li[role="option"], li[role="option"] span, div[data-baseweb="select"] span {
         color: #0F172A !important;
-        background-color: #FFFFFF !important;
-        font-weight: 500 !important;
     }
 
-    /* 드롭다운 터치/호버(마우스 올렸을 때) 항목 배경색 */
-    li[role="option"]:hover, li[role="option"][aria-selected="true"] {
+    /* 드롭다운 항목 hover/active 상태 */
+    li[role="option"]:hover,
+    li[role="option"][aria-selected="true"] {
         background-color: #E2E8F0 !important;
         color: #2563EB !important;
     }
 
-    /* Reflex 시그니처 파란색 모던 버튼 */
+    /* Reflex 파란색 버튼 */
     .stButton > button {
         border-radius: 12px !important;
         background-color: #3B82F6 !important;
@@ -125,12 +106,10 @@ st.markdown("""
         font-size: 0.9rem !important;
         padding: 0.5rem 1rem !important;
         box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25) !important;
-        transition: all 0.2s ease !important;
     }
 
     .stButton > button:hover {
         background-color: #2563EB !important;
-        transform: translateY(-1px);
     }
 
     /* 아코디언(Expander) UI 스타일링 */
@@ -141,7 +120,6 @@ st.markdown("""
         color: #0F172A !important;
         font-weight: 700 !important;
         padding: 0.8rem 1rem !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.02) !important;
     }
 
     .streamlit-expanderContent {
@@ -170,12 +148,6 @@ st.markdown("""
         font-size: 0.95rem !important;
         padding: 0 18px !important;
         border: 1px solid #E2E8F0 !important;
-        transition: all 0.2s ease-in-out !important;
-    }
-
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #E2E8F0 !important;
-        color: #0F172A !important;
     }
 
     .stTabs [aria-selected="true"] {
@@ -183,18 +155,12 @@ st.markdown("""
         color: #2563EB !important;
         border: 1.5px solid #3B82F6 !important;
         font-weight: 700 !important;
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.12) !important;
     }
 
     .stTabs [data-baseweb="tab-highlight"] {
         display: none !important;
     }
 
-    /* Alert / Metric 박스 스타일링 */
-    .stAlert {
-        border-radius: 12px !important;
-    }
-    
     [data-testid="stMetricValue"] {
         color: #3B82F6 !important;
         font-weight: 800 !important;
