@@ -69,37 +69,53 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 💡 [라디오 버튼 칩(Chip) 스타일링] 모바일 다크모드 영향 0% 구현 */
+    /* 💡 [알약형 칩 가로 스크롤 컨테이너] 모바일 스압 방지 처리 */
     div[data-testid="stRadio"] > label {
-        display: none !important; /* 라디오 기본 라벨 숨김 */
+        display: none !important;
     }
 
     div[data-testid="stRadio"] > div {
         display: flex !important;
-        flex-wrap: wrap !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;        /* 줄바꿈 금지 (한 줄로 배치) */
+        overflow-x: auto !important;          /* 좌우 가로 스크롤 허용 */
+        padding-bottom: 8px !important;       /* 스크롤바 여백 */
         gap: 8px !important;
-        background-color: transparent !important;
+        -webkit-overflow-scrolling: touch !important; /* iOS 모바일 부드러운 스크롤 */
     }
 
+    /* 모바일 가로 스크롤바 디자인 (얇고 세련되게) */
+    div[data-testid="stRadio"] > div::-webkit-scrollbar {
+        height: 5px !important;
+    }
+    div[data-testid="stRadio"] > div::-webkit-scrollbar-track {
+        background: #F1F5F9 !important;
+        border-radius: 10px !important;
+    }
+    div[data-testid="stRadio"] > div::-webkit-scrollbar-thumb {
+        background: #CBD5E1 !important;
+        border-radius: 10px !important;
+    }
+
+    /* 알약 버튼 개별 스타일 (줄바꿈 없이 고정 폭 유지) */
     div[data-testid="stRadio"] > div > label {
+        flex: 0 0 auto !important;           /* 칩 크기가 찌그러지지 않도록 고정 */
         background-color: #FFFFFF !important;
         border: 1.5px solid #CBD5E1 !important;
-        border-radius: 20px !important; /* 둥근 알약 스타일 */
+        border-radius: 20px !important;
         padding: 6px 16px !important;
         color: #0F172A !important;
         font-weight: 600 !important;
         font-size: 0.9rem !important;
         cursor: pointer !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        transition: all 0.2s ease !important;
+        white-space: nowrap !important;       /* 글자 줄바꿈 방지 */
     }
 
-    /* 라디오 원형 체크 아이콘 숨기기 (알약 버튼처럼 보이도록) */
     div[data-testid="stRadio"] > div > label > div:first-child {
         display: none !important;
     }
 
-    /* 선택된 칩 버튼 강조 */
     div[data-testid="stRadio"] > div > label[data-checked="true"],
     div[data-testid="stRadio"] > div > label:has(input:checked) {
         background-color: #3B82F6 !important;
@@ -112,7 +128,7 @@ st.markdown("""
     div[data-testid="stRadio"] > div > label:has(input:checked) * {
         color: #FFFFFF !important;
     }
-
+    
     /* 텍스트 입력창 */
     .stTextInput input {
         background-color: #FFFFFF !important;
