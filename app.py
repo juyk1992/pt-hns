@@ -345,7 +345,6 @@ def fetch_chem_safety_info(cas_no):
     """
     url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
     
-    # casNo가 올바르지 않거나 없을 경우 예외 처리
     if not cas_no or cas_no in ["-", "0000", "없음"]:
         return {
             "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음",
@@ -374,7 +373,7 @@ def fetch_chem_safety_info(cas_no):
     return safety_data
 
 # ==========================================
-# 3. Gemini 자연어 매핑 및 AI 요약 (CAS 번호 추가)
+# 3. Gemini 자연어 매핑 및 AI 요약
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
@@ -487,7 +486,7 @@ def load_integrated_hns_data(port_code):
     return None
 
 # ==========================================
-# 5. 항구별 데이터 렌더링 헬퍼 함수 (CAS_NO 적용)
+# 5. 항구별 데이터 렌더링 헬퍼 함수
 # ==========================================
 def render_port_dashboard(port_name, port_code):
     kst_now = datetime.utcnow() + timedelta(hours=9)
@@ -567,12 +566,14 @@ def render_port_dashboard(port_name, port_code):
                     with c_btn:
                         button_key = f"btn_{port_code}_{ship}_{idx}_{unno}"
                         if st.button("🤖 AI 가이드 생성", key=button_key, use_container_width=True):
-                            # AI가 CAS 번호까지 정밀 추출하도록 바인딩
                             mapped_info = map_search_query_with_gemini(chem_name)
                             st.session_state['active_chem'] = mapped_info.get("chem_ko", chem_name)
                             st.session_state['active_unno'] = unno
                             st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
+                            # 💡 기존 가이드 초기화 및 신규 요청 플래그 설정 후 즉시 갱신
+                            st.session_state['active_summary'] = ""
+                            st.session_state['active_key_changed'] = True
                             st.rerun()
 
 # ==========================================
@@ -622,9 +623,14 @@ if search_input:
                 st.session_state['active_unno'] = mapped_unno
                 st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
+                # 💡 기존 가이드 초기화 및 신규 요청 플래그 설정 후 즉시 갱신
+                st.session_state['active_summary'] = ""
+                st.session_state['active_key_changed'] = True
                 st.rerun()
 
-# AI 대응 가이드 출력 모달/컨테이너
+# ------------------------------------------
+# ⚡ AI 대응 가이드 출력 모달/컨테이너 (캐싱 보정)
+# ------------------------------------------
 if 'active_chem' in st.session_state:
     st.divider()
     chem = st.session_state['active_chem']
@@ -634,19 +640,20 @@ if 'active_chem' in st.session_state:
     
     st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno} / CAS NO: {cas})")
     
-    with st.spinner('공공 API + 해경 HNS 정보집 + Gemini AI 가이드 생성 중...'):
-        dgst_info = fetch_dgst_info(unno)
-        safety_info = fetch_chem_safety_info(cas)  # casNo 파라미터를 정상 활용!
-        ai_summary = generate_gemini_summary(chem, unno, cas, dgst_info, safety_info)
+    # 💡 신규 생성 요청이거나 캐시된 요약 결과가 없을 때만 API & Gemini 1회 호출
+    if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
+        with st.spinner('공공 API + 해경 HNS 정보집 + Gemini AI 가이드 생성 중...'):
+            dgst_info = fetch_dgst_info(unno)
+            safety_info = fetch_chem_safety_info(cas)
+            st.session_state['active_summary'] = generate_gemini_summary(chem, unno, cas, dgst_info, safety_info)
+            st.session_state['active_key_changed'] = False
         
-    st.markdown(ai_summary)
+    st.markdown(st.session_state['active_summary'])
     
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
-        del st.session_state['active_chem']
-        del st.session_state['active_unno']
-        if 'active_cas' in st.session_state:
-            del st.session_state['active_cas']
-        del st.session_state['active_ship']
+        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_summary', 'active_key_changed']:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
 
 st.divider()
