@@ -453,32 +453,57 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
+    """
+    [AI 통합 분석] 화학물질명, 관용명, 화학식뿐만 아니라
+    자유 사고 상황 문장(예: 평택호 좌초 황산 유출 중)을 종합 분석하여 
+    물질 정보와 사고 상황 텍스트를 함께 추출합니다.
+    """
+    default_res = {
+        "chem_ko": query_text, 
+        "chem_eng": query_text, 
+        "unno": "0000", 
+        "cas_no": "-", 
+        "accident_context": ""
+    }
     if not GEMINI_API_KEY or not query_text:
-        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
+        return default_res
 
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         prompt = f"""
-        사용자 입력 검색어: "{query_text}"
-        이 화학물질/관용명/화학식에 해당하는 가장 대표적인 위험물/HNS 화학물질의 표준 정보를 찾아 아래 JSON 포맷으로만 답변하세요. 다른 설명은 금지합니다:
-        {{"chem_ko": "공식 한글명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호", "cas_no": "CAS번호(예: 7664-93-9)"}}
+        사용자 입력 텍스트: "{query_text}"
+        
+        이 문장 또는 검색어에서:
+        1. 포함되어 있거나 가장 대표적인 위험물/HNS 화학물질의 표준 정보(한글명, 영문명, UN번호 4자리, CAS번호)를 분석하세요.
+        2. 만약 특정 사고 상황(예: 좌초, 충돌, 유출, 화재, 침수, 특정 장소 등)이 언급되어 있다면 해당 핵심 사고 상황 요약 문장을 "accident_context"에 작성하세요. (단순 물질명 검색일 경우 빈 문자열 "")
+
+        아래 JSON 포맷으로만 답변하세요. 다른 설명은 금지합니다:
+        {{
+            "chem_ko": "공식 한글명", 
+            "chem_eng": "공식 영문명", 
+            "unno": "4자리 UN번호", 
+            "cas_no": "CAS번호(예: 7664-93-9)",
+            "accident_context": "사고 상황 요약 문장 또는 빈값"
+        }}
         """
         
-        # 📌 고정된 모델 우선순위: 3.6 flash -> 3.5 flash lite -> 3.5 flash
         candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
         for model_id in candidate_models:
             try:
                 response = client.models.generate_content(model=model_id, contents=prompt)
                 text = response.text.replace('```json', '').replace('```', '').strip()
-                return json.loads(text)
+                res_json = json.loads(text)
+                if "accident_context" not in res_json:
+                    res_json["accident_context"] = ""
+                return res_json
             except Exception:
                 continue
 
-        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
+        return default_res
     except Exception:
-        return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
+        return default_res
 
-def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_text):
+def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_text, accident_context=""):
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
         
@@ -488,11 +513,13 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         hns_context = f"[해양경찰청 HNS 정보집 원본 데이터]\n{hns_raw_text}\n" if hns_raw_text else ""
 
         rag_context = f"[위험유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 결과]\n{rag_text}\n"
+        
+        accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
         제공된 데이터들을 종합 분석하여 현장 대응 가이드를 작성하세요.
-
+        {accident_info}
         {hns_context}
         {rag_context}
 
@@ -515,7 +542,8 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 
         [작성 핵심 규칙]
         1. 최상단 핵심요약문은 **장황한 설명글을 절대 금지**하며, 현장 요원이 보고 1초만에 지시/전파할 수 있도록 **핵심 키워드, 수치(M단위), 구체적 단어 위주로 극도로 간결하게 표 형태로 작성**하세요.
-        2. 하단의 1~4번 세부 지침 작성 시, 현장 요원이 즉시 조치할 수 있도록 **모든 항목을 반드시 개조식(-, •)의 명확하고 간결한 문장으로 나열**하여 작성하세요.
+        2. 만약 [현장 사고 상황 조건]이 제공되어 있다면, **해당 특정 사고 상황(좌초, 유출, 화재 등)에 맞춰 특화된 맞춤형 대응 조치 및 주의사항을 최우선적으로 반영**하세요.
+        3. 하단의 1~4번 세부 지침 작성 시, 현장 요원이 즉시 조치할 수 있도록 **모든 항목을 반드시 개조식(-, •)의 명확하고 간결한 문장으로 나열**하여 작성하세요.
 
         --- 출력 형식을 엄격히 준수하세요 ---
 
@@ -534,7 +562,6 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구/기타)
         """
 
-        # 📌 고정된 모델 우선순위: 3.6 flash -> 3.5 flash lite -> 3.5 flash
         candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
         for model_id in candidate_models:
             try:
@@ -653,6 +680,7 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_unno'] = unno
                             st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
+                            st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
                             st.session_state['active_summary'] = ""
                             st.session_state['active_key_changed'] = True
                             st.rerun()
@@ -679,31 +707,36 @@ else:
     """, unsafe_allow_html=True)
 
 # ------------------------------------------
-# 🔥 [통합] HNS 화학물질 AI 스마트 매핑 검색창
+# 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 화학물질 AI 스마트 검색")
+st.markdown("### 🔎 AI 통합 검색창 (화학물질 또는 사고 상황 자유 입력)")
 search_input = st.text_input(
-    "화학물질명, 화학식, 관용명을 입력하세요 (예: H2SO4, 황산, 가성소다, LNG, 수산화나트륨)", 
+    "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 황산 유출 중)", 
     key="global_search_box"
 )
 
 if search_input:
-    with st.spinner("Gemini AI가 화학물질을 정밀 분석 중..."):
+    with st.spinner("Gemini AI가 입력 내용을 지능형 분석 중..."):
         mapped_result = map_search_query_with_gemini(search_input)
         mapped_ko = mapped_result.get("chem_ko", search_input)
         mapped_eng = mapped_result.get("chem_eng", search_input)
         mapped_unno = str(mapped_result.get("unno", "0000")).zfill(4)
         mapped_cas = str(mapped_result.get("cas_no", "-"))
+        accident_ctx = mapped_result.get("accident_context", "")
         
         c1, c2 = st.columns([4, 1])
         with c1:
-            st.info(f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`")
+            info_msg = f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`"
+            if accident_ctx:
+                info_msg += f"<br>🚨 **사고 상황 식별:** `{accident_ctx}`"
+            st.info(info_msg, icon="💡")
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
                 st.session_state['active_chem'] = mapped_ko
                 st.session_state['active_unno'] = mapped_unno
                 st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
+                st.session_state['active_accident_context'] = accident_ctx
                 st.session_state['active_summary'] = ""
                 st.session_state['active_key_changed'] = True
                 st.rerun()
@@ -717,27 +750,32 @@ if 'active_chem' in st.session_state:
     unno = st.session_state['active_unno']
     cas = st.session_state.get('active_cas', '-')
     ship_info = st.session_state['active_ship']
+    accident_ctx = st.session_state.get('active_accident_context', '')
     
-    st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno} / CAS NO: {cas})")
+    status_header = f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno} / CAS NO: {cas})"
+    if accident_ctx:
+        status_header += f" ｜ 상황: {accident_ctx}"
+    st.error(status_header)
     
     if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
-        with st.spinner('공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI 가이드 분석 및 생성 중...'):
+        with st.spinner('공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI 종합 분석 중...'):
             dgst_info = fetch_dgst_info(unno)
             safety_info = fetch_chem_safety_info(cas)
             kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
             
-            # RAG Vector DB 검색 수행 (결과는 프롬프트 지침으로만 전달됨)
-            rag_text = fetch_rag_context(f"{chem} {unno} 사고 대응 및 방제 조치")
+            # RAG Vector DB 검색 (검색어 + 사고 상황 포함 조합)
+            rag_search_query = f"{chem} {unno} {accident_ctx} 사고 대응 방제 조치"
+            rag_text = fetch_rag_context(rag_search_query)
             
             st.session_state['active_summary'] = generate_gemini_summary(
-                chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_text
+                chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_text, accident_context=accident_ctx
             )
             st.session_state['active_key_changed'] = False
         
     st.markdown(st.session_state['active_summary'])
     
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
-        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_summary', 'active_key_changed']:
+        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_accident_context', 'active_summary', 'active_key_changed']:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
