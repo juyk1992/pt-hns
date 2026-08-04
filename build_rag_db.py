@@ -4,6 +4,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from google import genai
+from google.genai import types
 
 # GitHub Secrets에서 등록된 GEMINI_API_KEY 로드
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -12,10 +13,14 @@ if not GEMINI_API_KEY:
     print("❌ ERROR: GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
     sys.exit(1)
 
-# Google 공식 최신 SDK (google-genai) 기반 Custom Embeddings 클래스
+# Google 공식 최신 SDK 기반 Custom Embeddings 클래스
 class GeminiEmbeddings:
     def __init__(self, api_key: str, model_name: str = "text-embedding-004"):
-        self.client = genai.Client(api_key=api_key)
+        # 💡 [핵심 수정] 404 에러 방지를 위해 v1 정식 API 버전 명시
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(api_version='v1')
+        )
         self.model_name = model_name
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -58,7 +63,7 @@ def build_kcg_vector_db():
     )
     docs = text_splitter.split_documents(documents)
 
-    print("🧠 Gemini Embedding (text-embedding-004) 변환 및 Chroma DB 생성 중...")
+    print("🧠 Gemini Embedding (v1 API) 변환 및 Chroma DB 생성 중...")
     embeddings = GeminiEmbeddings(api_key=GEMINI_API_KEY, model_name="text-embedding-004")
 
     vectorstore = Chroma.from_documents(
