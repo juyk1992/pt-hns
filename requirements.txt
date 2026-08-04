@@ -2,3 +2,9 @@ streamlit
 pandas
 requests
 google-genai
+langchain-community
+langchain-huggingface
+sentence-transformers
+chromadb
+pysqlite3-binary
+pypdf
