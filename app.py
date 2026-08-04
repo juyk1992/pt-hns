@@ -8,6 +8,10 @@ import base64
 from datetime import datetime, timedelta
 from google import genai
 
+# RAG Vector DB 연동 라이브러리
+from langchain_community.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+
 # ==========================================
 # 0. 로컬 이미지 경로 및 Base64 변환 함수
 # ==========================================
@@ -39,9 +43,6 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
 
-    /* ==========================================
-       1. 기본 라이트 모드 테마 변수 정의
-       ========================================== */
     :root {
         --bg-main: #F8FAFC;
         --bg-card: #FFFFFF;
@@ -53,9 +54,6 @@ st.markdown("""
         --accent-blue-hover: #2563EB;
     }
 
-    /* ==========================================
-       2. 다크 모드 자동 감지 및 변수 재정의
-       ========================================== */
     @media (prefers-color-scheme: dark) {
         :root {
             --bg-main: #0F172A;
@@ -69,7 +67,6 @@ st.markdown("""
         }
     }
 
-    /* Streamlit 테마 설정이 다크일 때도 강제 반영 */
     [data-theme="dark"] {
         --bg-main: #0F172A;
         --bg-card: #1E293B;
@@ -81,9 +78,6 @@ st.markdown("""
         --accent-blue-hover: #3B82F6;
     }
 
-    /* ==========================================
-       3. 동적 변수 기반 글로벌 스타일 적용
-       ========================================== */
     html, body, [class*="css"], .stApp {
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif !important;
         background-color: var(--bg-main) !important;
@@ -94,7 +88,6 @@ st.markdown("""
         color: var(--text-main) !important;
     }
 
-    /* Hero 컨테이너 */
     .hero-container {
         padding: 2rem;
         background: var(--bg-card) !important;
@@ -118,7 +111,6 @@ st.markdown("""
         font-weight: 500;
     }
 
-    /* UNNO 배지 */
     .badge-unno {
         background-color: #EF4444 !important;
         color: #FFFFFF !important;
@@ -129,7 +121,6 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    /* 2줄 고정 가로 스크롤 선박 칩(Radio) */
     div[data-testid="stRadio"] > label {
         display: none !important;
     }
@@ -177,7 +168,6 @@ st.markdown("""
         display: none !important;
     }
 
-    /* 선택된 칩 */
     div[data-testid="stRadio"] > div > label[data-checked="true"],
     div[data-testid="stRadio"] > div > label:has(input:checked) {
         background-color: var(--accent-blue) !important;
@@ -190,7 +180,6 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    /* 입력창 */
     .stTextInput input {
         background-color: var(--bg-card) !important;
         border: 1px solid var(--border-color) !important;
@@ -199,7 +188,6 @@ st.markdown("""
         font-weight: 600 !important;
     }
 
-    /* 버튼 */
     .stButton > button {
         border-radius: 12px !important;
         background-color: var(--accent-blue) !important;
@@ -220,7 +208,6 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    /* Expander(아코디언) */
     .streamlit-expanderHeader {
         background-color: var(--bg-card) !important;
         border-radius: 14px !important;
@@ -239,7 +226,6 @@ st.markdown("""
         padding: 1rem !important;
     }
 
-    /* 탭(Tabs) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 10px;
         background-color: transparent !important;
@@ -280,7 +266,7 @@ PUBLIC_API_KEY = st.secrets.get("PUBLIC_API_KEY", "")
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # ==========================================
-# 1. HNS 정보집 원본 텍스트 DB 로드
+# 1. HNS 정보집 원본 텍스트 DB & RAG Vector DB 로드
 # ==========================================
 @st.cache_data
 def load_full_hns_db():
@@ -306,13 +292,51 @@ def find_hns_raw_text(query):
             return item.get('raw_full_text', '')
     return None
 
+# 🧠 RAG Vector DB 로드 모듈 (ChromaDB + HuggingFace)
+@st.cache_resource
+def load_kcg_vectorstore():
+    persist_dir = "./kcg_guide_chromadb"
+    if os.path.exists(persist_dir):
+        try:
+            embeddings = HuggingFaceEmbeddings(
+                model_name="jhgan/ko-sroberta-multitask",
+                model_kwargs={'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+            return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
+        except Exception as e:
+            print(f"RAG Vector DB 로드 실패: {e}")
+    return None
+
+kcg_vectorstore = load_kcg_vectorstore()
+
+def fetch_rag_context(query, k=3):
+    """해양사고 대응 가이드 PDF에서 연관 지침 RAG 검색"""
+    if not kcg_vectorstore or not query:
+        return {"context": "RAG 가이드 데이터베이스 미생성", "docs": []}
+    
+    try:
+        docs = kcg_vectorstore.similarity_search(query, k=k)
+        if not docs:
+            return {"context": "관련 가이드 지침 검색 결과 없음", "docs": []}
+        
+        context_items = []
+        for doc in docs:
+            page = doc.metadata.get('page', 0) + 1
+            context_items.append(f"[대응가이드 {page}쪽 지침]\n{doc.page_content}")
+            
+        return {
+            "context": "\n\n".join(context_items),
+            "docs": docs
+        }
+    except Exception as e:
+        return {"context": f"RAG 검색 오류: {e}", "docs": []}
+
 # ==========================================
 # 2. 공공 API 연동 모듈
 # ==========================================
 def fetch_dgst_info(unno):
-    """
-    [해양수산부 위험물정보 API]
-    """
+    """[해양수산부 위험물정보 API]"""
     url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
     params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
@@ -337,9 +361,7 @@ def fetch_dgst_info(unno):
     return info
 
 def fetch_chem_safety_info(cas_no):
-    """
-    [화학물질안전원 화학물질 안전관리정보 API]
-    """
+    """[화학물질안전원 화학물질 안전관리정보 API]"""
     url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
     
     if not cas_no or cas_no in ["-", "0000", "없음"]:
@@ -370,15 +392,10 @@ def fetch_chem_safety_info(cas_no):
     return safety_data
 
 def fetch_kosha_msds_info(chem_name, cas_no, unno):
-    """
-    [안전보건공단 MSDS OPEN API 연동]
-    1. getChemList: 국문명(0) -> CAS No(1) -> UN No(2) 순차 검색으로 chemId 발급
-    2. getChemDetail01 ~ 16: chemId 기반 1~16번 항목 전체 텍스트 수집
-    """
+    """[안전보건공단 MSDS OPEN API 연동]"""
     base_url = "https://msds.kosha.or.kr/openapi/service/msdschem"
     chem_id = None
 
-    # 국문명 -> CAS No -> UN No 순차 검색 시도
     search_trials = [
         (chem_name, "0"),
         (cas_no, "1"),
@@ -412,7 +429,6 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     if not chem_id:
         return "안전보건공단 MSDS 연동 데이터 없음 (chemId 미발급)"
 
-    # 1~16번 세부 항목 전체 호출 수집
     msds_details = []
     for i in range(1, 17):
         op_name = f"getChemDetail{i:02d}"
@@ -433,7 +449,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     if not msds_details:
         return f"안전보건공단 MSDS 기본 정보 등록 (chemId: {chem_id})"
 
-    return f"[KOSHA MSDS chemId: {chem_id}]\n" + "\n".join(msds_details[:30]) # 주요 핵심 항목 위주 구성
+    return f"[KOSHA MSDS chemId: {chem_id}]\n" + "\n".join(msds_details[:30])
 
 # ==========================================
 # 3. Gemini 자연어 매핑 및 AI 요약
@@ -451,7 +467,7 @@ def map_search_query_with_gemini(query_text):
         {{"chem_ko": "공식 한글명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호", "cas_no": "CAS번호(예: 7664-93-9)"}}
         """
         
-        candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
+        candidate_models = ['gemini-2.5-flash', 'gemini-1.5-flash']
         for model_id in candidate_models:
             try:
                 response = client.models.generate_content(model=model_id, contents=prompt)
@@ -464,20 +480,23 @@ def map_search_query_with_gemini(query_text):
     except Exception:
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
 
-def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text):
+def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_data):
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
         
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         hns_raw_text = find_hns_raw_text(unno) or find_hns_raw_text(chem_name)
-        hns_context = f"[해양경찰청 HNS 정보집 원본 문서 정보]\n{hns_raw_text}\n" if hns_raw_text else "[해양경찰청 HNS 정보집 정보]\n매칭 데이터 참조\n"
+        hns_context = f"[해양경찰청 HNS 정보집 원본 데이터]\n{hns_raw_text}\n" if hns_raw_text else ""
+
+        rag_context = f"[위험유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 결과]\n{rag_data.get('context', '')}\n"
 
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
         제공된 데이터들을 종합 분석하여 현장 대응 가이드를 작성하세요.
 
         {hns_context}
+        {rag_context}
 
         [해양수산부 위험물정보 API 수집 데이터]
         - 물질명: {chem_name} (UN NO: {unno})
@@ -506,7 +525,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         | 구분 | 핵심 대응 내용 |
         |---|---|
         | **사고물질/위험성** | [IMDG 등급] + [핵심위험: 예) 인화성/독성가스/수반응성] |
-        | **대피/이격거리** | **초기이격:** OOm / **화재대피:** OOm / **유출방호:** OOm (HNS 정보집 수치 필수) |
+        | **대피/이격거리** | **초기이격:** OOm / **화재대피:** OOm / **유출방호:** OOm (가이드 수치 필수) |
         | **필수 보호구** | **[Level A/C]** + [공기호흡기/내화학복/복합가스탐지기 등 필수장비] |
         | **초동 행동수칙** | **[풍상위치]** + [핵심금지사항 및 소화약제 요약] |
 
@@ -517,7 +536,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구/기타)
         """
 
-        candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
+        candidate_models = ['gemini-2.5-flash', 'gemini-1.5-flash']
         for model_id in candidate_models:
             try:
                 response = client.models.generate_content(model=model_id, contents=prompt)
@@ -636,6 +655,7 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
                             st.session_state['active_summary'] = ""
+                            st.session_state['active_rag_docs'] = []
                             st.session_state['active_key_changed'] = True
                             st.rerun()
 
@@ -649,14 +669,14 @@ if kcg_logo_b64:
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
             <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 솔루션</div>
         </div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 HNS 정보집 DB + Gemini AI 지능형 대응 시스템</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 HNS 정보집 DB + Gemini AI 지능형 대응 시스템</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -687,6 +707,7 @@ if search_input:
                 st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
                 st.session_state['active_summary'] = ""
+                st.session_state['active_rag_docs'] = []
                 st.session_state['active_key_changed'] = True
                 st.rerun()
 
@@ -703,17 +724,33 @@ if 'active_chem' in st.session_state:
     st.error(f"⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO: {unno} / CAS NO: {cas})")
     
     if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
-        with st.spinner('공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 HNS 정보집 DB + Gemini AI 가이드 생성 중...'):
+        with st.spinner('공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI 가이드 분석 및 생성 중...'):
             dgst_info = fetch_dgst_info(unno)
             safety_info = fetch_chem_safety_info(cas)
             kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
-            st.session_state['active_summary'] = generate_gemini_summary(chem, unno, cas, dgst_info, safety_info, kosha_msds_text)
+            
+            # RAG Vector DB 검색 수행
+            rag_data = fetch_rag_context(f"{chem} {unno} 사고 대응 및 방제 조치")
+            st.session_state['active_rag_docs'] = rag_data.get('docs', [])
+            
+            st.session_state['active_summary'] = generate_gemini_summary(
+                chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_data
+            )
             st.session_state['active_key_changed'] = False
         
     st.markdown(st.session_state['active_summary'])
     
+    # 📚 RAG 참조 원문 표시 기능
+    if st.session_state.get('active_rag_docs'):
+        with st.expander("📚 [참조] 해양유해물질(HNS) 해양사고 대응 가이드 PDF 원문 검색 지침 보기", expanded=False):
+            for i, doc in enumerate(st.session_state['active_rag_docs'], 1):
+                page = doc.metadata.get('page', 0) + 1
+                st.markdown(f"**📄 [참조 {i}] 가이드 약 {page}쪽**")
+                st.caption(doc.page_content)
+                st.markdown("---")
+    
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
-        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_summary', 'active_key_changed']:
+        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_summary', 'active_rag_docs', 'active_key_changed']:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
