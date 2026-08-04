@@ -717,7 +717,7 @@ else:
 # ------------------------------------------
 # 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 자유 입력)")
+st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 입력)")
 search_input = st.text_input(
     "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
     key="global_search_box"
@@ -803,7 +803,7 @@ if 'active_chem' in st.session_state:
                 "🚢 해수부 위험물정보", 
                 "🛡️ 화학물질안전원", 
                 "📄 해경 HNS 정보집", 
-                "🧠 해경 대응가이드 RAG",
+                "🧠 해경 HNS 대응가이드",
                 "🏥 안전보건공단 MSDS"
             ])
             
@@ -817,7 +817,7 @@ if 'active_chem' in st.session_state:
                 st.write(f"- **주의사항:** {d.get('catinMatter', '-')}")
 
             with t2:
-                st.markdown("**[화학물질안전원 안전관리정보 API 수집 데이터]**")
+                st.markdown("**[화학물질안전원 화학물질 안전관리정보 API 수집 데이터]**")
                 s = src.get("safety", {})
                 st.write(f"- **표적장기 및 주요증상:** {s.get('symptom', '-')}")
                 st.write(f"- **흡입 영향:** {s.get('inhale', '-')}")
@@ -826,7 +826,7 @@ if 'active_chem' in st.session_state:
                 st.write(f"- **기타 유의사항:** {s.get('etc', '-')}")
 
             with t3:
-                st.markdown("**[해양경찰청 HNS 정보집 원본 데이터]**")
+                st.markdown("**[해양경찰청 HNS 정보집]**")
                 hns_t = src.get("hns_raw")
                 if hns_t:
                     st.text_area("HNS 정보집 원본 텍스트", value=hns_t[:1500] + ("..." if len(hns_t) > 1500 else ""), height=200, disabled=True)
@@ -834,12 +834,12 @@ if 'active_chem' in st.session_state:
                     st.info("해당 물질의 HNS 정보집 단일 텍스트 DB 매칭 내역 없음 (API 및 RAG 대체)")
 
             with t4:
-                st.markdown("**[해양유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 지침]**")
+                st.markdown("**[위험유해물질(HNS) 해양사고 대응 가이드]**")
                 rag_t = src.get("rag_text", "")
                 st.text_area("Vector DB 추출 지침 (k=5)", value=rag_t, height=200, disabled=True)
 
             with t5:
-                st.markdown("**[안전보건공단 MSDS API 1~16번 항목 데이터]**")
+                st.markdown("**[안전보건공단 MSDS API 수집 데이터]**")
                 k_t = src.get("kosha", "")
                 st.text_area("MSDS 세부 수집 정보", value=k_t, height=200, disabled=True)
     
