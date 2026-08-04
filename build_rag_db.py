@@ -12,7 +12,7 @@ if not GEMINI_API_KEY:
     print("❌ ERROR: GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
     sys.exit(1)
 
-# LangChain 전용 구글 API 키 환경변수 설정
+# LangChain 전용 API Key 설정
 os.environ["GOOGLE_API_KEY"] = GEMINI_API_KEY
 
 def build_kcg_vector_db():
@@ -36,9 +36,9 @@ def build_kcg_vector_db():
     docs = text_splitter.split_documents(documents)
 
     print("🧠 Gemini Embedding (text-embedding-004) 변환 및 Chroma DB 생성 중...")
-    # LangChain 공식 Google Embeddings 적용
+    # 💡 [핵심 수정] models/ 접두사를 제거하고 "text-embedding-004"만 전달
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
+        model="text-embedding-004",
         google_api_key=GEMINI_API_KEY
     )
 
