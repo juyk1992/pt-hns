@@ -46,7 +46,7 @@ jobs:
       run: |
         git config --global user.name 'GitHub Action Bot'
         git config --global user.email 'action@github.com'
-        git add pyeongtaek_hns_report.csv daesan_hns_report.csv
+        git add hns_pyeongtaek_report.csv hns_daesan_report.csv
         git commit -m "🤖 [포트미스 자동동기화] 평택항/대산항 HNS 위험물반입현황 갱신" || echo "변경사항 없음"
         git pull --rebase origin main || true
         git push
