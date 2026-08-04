@@ -723,7 +723,7 @@ if search_input:
         with c1:
             info_msg = f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`"
             if accident_ctx:
-                info_msg += f"\n 🚨 **사고 상황 식별:** `{accident_ctx}`"
+                info_msg += f"\n ｜ 🚨 **사고 상황 식별:** `{accident_ctx}`"
             st.info(info_msg)
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
