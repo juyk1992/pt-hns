@@ -310,7 +310,7 @@ def load_kcg_vectorstore():
 
 kcg_vectorstore = load_kcg_vectorstore()
 
-def fetch_rag_context(query, k=3):
+def fetch_rag_context(query, k=5):
     """해양사고 대응 가이드 PDF에서 연관 지침 RAG 검색"""
     if not kcg_vectorstore or not query:
         return "RAG 가이드 데이터베이스 미생성"
@@ -511,9 +511,11 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         
         accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
+        # 💡 [상황실 표준 가이드 분석 반영 고도화 프롬프트]
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
-        제공된 데이터들을 종합 분석하여 현장 대응 가이드를 작성하세요.
+        수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여 현장 요원이 1초 만에 지시 및 조치할 수 있는 최적의 대응 가이드를 작성하세요.
+
         {accident_info}
         {hns_context}
         {rag_context}
@@ -535,10 +537,15 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         [안전보건공단 MSDS 1~16번 종합 수집 데이터]
         {kosha_msds_text}
 
-        [작성 핵심 규칙]
-        1. 최상단 핵심요약문은 **장황한 설명글을 절대 금지**하며, 현장 요원이 보고 1초만에 지시/전파할 수 있도록 **핵심 키워드, 수치(M단위), 구체적 단어 위주로 극도로 간결하게 표 형태로 작성**하세요.
-        2. 만약 [현장 사고 상황 조건]이 제공되어 있다면, **해당 특정 사고 상황(좌초, 유출, 화재 등)에 맞춰 특화된 맞춤형 대응 조치 및 주의사항을 최우선적으로 반영**하세요.
-        3. 하단의 1~4번 세부 지침 작성 시, 현장 요원이 즉시 조치할 수 있도록 **모든 항목을 반드시 개조식(-, •)의 명확하고 간결한 문장으로 나열**하여 작성하세요.
+        [상황실 지침 반영 엄격 분석 및 작성 규칙]
+        1. [상황실 대응 5단계 및 우선순위]:
+           - 이격거리: 해경 HNS 가이드 수치를 최우선 반영하되, 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 적용.
+           - 접근방식: 바람을 등지고 방어적 접근(풍상위치 확보), 유해가스 발생 개연성 시 가스탐지 및 CARIS 위험구역 전파.
+           - 직수 금지: 물 반응성 물질 확인 시 직사주수 절대 금지.
+           - 선체 및 방제조치: 자체 소화/방제 지원, 필요시 거주구 내기 전환/자기보호시스템 가동, 침수 시 방수/배수 및 임의좌초/이적 고려.
+        2. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우(화재·폭발, 유출, 충돌·침수, 좌초 등), 해당 사고 유형별 비상조치 지원 지침을 최우선 반영하세요.
+        3. [초동대응 핵심요약 표]: 서술형 문장을 절대 금지하며, **단어, 수치(M단위), 명사형 핵심 키워드 위주로 극도로 간결하게 작성**하세요. 불명확한 수치는 추정하지 말고 '정보없음(현장확인 필요)'으로 명시하세요.
+        4. [세부 지침 1~4번]: 모든 항목을 현장 행동 위주의 **개조식(-, •) 문장**으로 구성하세요.
 
         --- 출력 형식을 엄격히 준수하세요 ---
 
@@ -546,13 +553,13 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         | 구분 | 핵심 대응 내용 |
         |---|---|
         | **사고물질/위험성** | [IMDG 등급] + [핵심위험: 예) 인화성/독성가스/수반응성] |
-        | **대피/이격거리** | **초기이격:** OOm / **화재대피:** OOm / **유출방호:** OOm (가이드 수치 필수) |
-        | **필수 보호구** | **[Level A/C]** + [공기호흡기/내화학복/복합가스탐지기 등 필수장비] |
-        | **초동 행동수칙** | **[풍상위치]** + [핵심금지사항 및 소화약제 요약] |
+        | **대피/이격거리** | **초기이격:** OOm / **화재대피:** OOm / **유출방호:** OOm |
+        | **필수 보호구** | **[Level A/B/C/D]** + [공기호흡기/내화학복/가스탐지기 등 필수장비] |
+        | **초동 행동수칙** | **[풍상위치 확보]** + [사고상황 맞춤 행동 및 소화/방제/통제 수칙 요약] |
 
         ---
         ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (EmS/적재방법/주의사항)
-        ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령
+        ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령 (상황실 단계별 대응 및 사고상황 맞춤)
         ### 3. ⛔ 절대 금지 행동 (금기 사항 - 물 접촉 금지, 직사주수 금지 등)
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구/기타)
         """
@@ -688,25 +695,25 @@ if kcg_logo_b64:
     <div class="hero-container">
         <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 6px;">
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
-            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 솔루션</div>
+            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
         </div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
 # ------------------------------------------
 # 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 AI 통합 검색창 (화학물질 또는 사고 상황 자유 입력)")
+st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 자유 입력)")
 search_input = st.text_input(
-    "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 황산 유출 중)", 
+    "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
     key="global_search_box"
 )
 
@@ -723,7 +730,7 @@ if search_input:
         with c1:
             info_msg = f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`"
             if accident_ctx:
-                info_msg += f"\n🚨 **사고 상황 식별:** `{accident_ctx}`"
+                info_msg += f"\n ｜ 🚨 **사고 상황 식별:** `{accident_ctx}`"
             st.info(info_msg)
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
@@ -753,7 +760,7 @@ if 'active_chem' in st.session_state:
     st.error(status_header)
     
     if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
-        with st.spinner('공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI 종합 분석 중...'):
+        with st.spinner('공공 API + 해경 HNS DB + Gemini AI 종합 분석 중...'):
             dgst_info = fetch_dgst_info(unno)
             safety_info = fetch_chem_safety_info(cas)
             kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
