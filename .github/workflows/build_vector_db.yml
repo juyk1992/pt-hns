@@ -19,8 +19,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # 💡 [핵심] 최신 버그 패키지 대신 404 오류가 없는 구버전으로 버전 고정
-          pip install "langchain-google-genai==2.0.1" "google-generativeai==0.8.3" langchain-community langchain-text-splitters chromadb pypdf
+          pip install sentence-transformers langchain-huggingface langchain-community langchain-text-splitters chromadb pypdf
           
       - name: Run Vector DB Build Script
         env:
