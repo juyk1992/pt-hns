@@ -688,25 +688,25 @@ if kcg_logo_b64:
     <div class="hero-container">
         <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 6px;">
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
-            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 솔루션</div>
+            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
         </div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응 가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응 가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
 # ------------------------------------------
 # 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 AI 통합 검색창 (화학물질 또는 사고 상황 자유 입력)")
+st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 자유 입력)")
 search_input = st.text_input(
-    "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 황산 유출 중)", 
+    "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
     key="global_search_box"
 )
 
@@ -723,7 +723,7 @@ if search_input:
         with c1:
             info_msg = f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`"
             if accident_ctx:
-                info_msg += f"\n🚨 **사고 상황 식별:** `{accident_ctx}`"
+                info_msg += f"\n 🚨 **사고 상황 식별:** `{accident_ctx}`"
             st.info(info_msg)
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
