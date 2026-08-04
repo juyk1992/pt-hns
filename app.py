@@ -345,7 +345,6 @@ def fetch_dgst_info(unno):
         }
 
     clean_unno = str(unno).strip().zfill(4)
-    # 💡 HTTPS 적용 및 인증키 URL 결합
     url = f"https://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
     params = {'unno': clean_unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
@@ -380,7 +379,6 @@ def fetch_chem_safety_info(cas_no):
         }
 
     clean_cas = str(cas_no).strip()
-    # 💡 HTTPS 적용 및 인증키 URL 결합
     url = f"https://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
     params = {'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
@@ -839,7 +837,7 @@ if 'active_chem' in st.session_state:
                 if hns_t:
                     st.text_area("HNS 정보집 원본 텍스트", value=hns_t[:1500] + ("..." if len(hns_t) > 1500 else ""), height=200, disabled=True)
                 else:
-                    st.info("해당 물질의 HNS 정보집 매칭 내역 없음 (API 및 RAG 대체)")
+                    st.info("해당 물질의 HNS 정보집 매칭 내역 없음")
 
             with t4:
                 st.markdown("**[해양경찰청 HNS 해양사고 대응 가이드]**")
