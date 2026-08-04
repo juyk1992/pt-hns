@@ -21,11 +21,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install sentence-transformers langchain-huggingface langchain-community langchain-text-splitters chromadb pypdf
           
-      - name: Run Vector DB Build Script
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      # - name: Run Vector DB Build Script
+      #   env:
+      #     GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      #   run: |
+      #     python build_rag_db.py
+
+      - name: Run Vector DB Test Script
         run: |
-          python build_rag_db.py
+          python test_rag.py
 
       - name: Commit and Push Vector DB Folder
         run: |
