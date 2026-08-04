@@ -330,12 +330,20 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈
+# 2. 공공 API 연동 모듈 (API 활용가이드 규격 반영)
 # ==========================================
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
-    url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
-    params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
+    if not unno or unno in ["0000", "-", ""]:
+        return {
+            "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
+            "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
+        }
+
+    clean_unno = str(unno).strip().zfill(4)
+    # 💡 인증키 URL 이중 인코딩 방지 처리
+    url = f"http://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
+    params = {'unno': clean_unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
         "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
         "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
@@ -359,16 +367,16 @@ def fetch_dgst_info(unno):
 
 def fetch_chem_safety_info(cas_no):
     """[화학물질안전원 화학물질 안전관리정보 API]"""
-    url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
-    
-    if not cas_no or cas_no in ["-", "0000", "없음"]:
+    if not cas_no or cas_no in ["-", "0000", "없음", ""]:
         return {
             "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음",
             "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
         }
 
     clean_cas = str(cas_no).strip()
-    params = {'serviceKey': PUBLIC_API_KEY, 'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
+    # 💡 인증키 URL 이중 인코딩 방지 처리
+    url = f"http://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
+    params = {'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
         "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음", 
         "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
@@ -511,10 +519,10 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         
         accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
-        # 💡 [상황실 표준 가이드 분석 반영 고도화 프롬프트]
+        # 💡 [줄바꿈 및 개별 불릿 적용 고도화 프롬프트]
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
-        수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여 현장 요원이 1초 만에 지시 및 조치할 수 있는 최적의 대응 가이드를 작성하세요.
+        수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
 
         {accident_info}
         {hns_context}
@@ -537,31 +545,29 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         [안전보건공단 MSDS 1~16번 종합 수집 데이터]
         {kosha_msds_text}
 
-        [상황실 지침 반영 엄격 분석 및 작성 규칙]
-        1. [상황실 대응 5단계 및 우선순위]:
-           - 이격거리: 해경 HNS 가이드 수치를 최우선 반영하되, 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 적용.
-           - 접근방식: 바람을 등지고 방어적 접근(풍상위치 확보), 유해가스 발생 개연성 시 가스탐지 및 CARIS 위험구역 전파.
-           - 직수 금지: 물 반응성 물질 확인 시 직사주수 절대 금지.
-           - 선체 및 방제조치: 자체 소화/방제 지원, 필요시 거주구 내기 전환/자기보호시스템 가동, 침수 시 방수/배수 및 임의좌초/이적 고려.
-        2. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우(화재·폭발, 유출, 충돌·침수, 좌초 등), 해당 사고 유형별 비상조치 지원 지침을 최우선 반영하세요.
-        3. [초동대응 핵심요약 표]: 서술형 문장을 절대 금지하며, **단어, 수치(M단위), 명사형 핵심 키워드 위주로 극도로 간결하게 작성**하세요. 불명확한 수치는 추정하지 말고 '정보없음(현장확인 필요)'으로 명시하세요.
-        4. [세부 지침 1~4번]: 모든 항목을 현장 행동 위주의 **개조식(-, •) 문장**으로 구성하세요.
+        [상황실 지침 반영 엄격 작성 규칙]
+        1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
+        2. [수치 및 안전 기준]: 
+           - 이격거리 및 보호구 등 핵심 수치는 **해경 HNS 대응가이드(RAG) 및 HNS 정보집 DB 수치를 최우선 반영**하세요.
+           - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
+           - 물 반응성 물질 확인 시 직사주수 절대 금지를 명시하세요.
+        3. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우(화재·폭발, 유출, 충돌·침수, 좌초 등), 해당 사고 유형별 비상조치 지원 지침을 최우선 지시사항으로 포함하세요.
+        4. [세부 지침 1~4번]: 모든 항목을 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
 
-        --- 출력 형식을 엄격히 준수하세요 ---
+        --- 출력 형식을 엄격히 준수하세요 (항목 간 반드시 엔터로 줄바꿈) ---
 
         ### 🚨 [초동대응 핵심요약]
-        | 구분 | 핵심 대응 내용 |
-        |---|---|
-        | **사고물질/위험성** | [IMDG 등급] + [핵심위험: 예) 인화성/독성가스/수반응성] |
-        | **대피/이격거리** | **초기이격:** OOm / **화재대피:** OOm / **유출방호:** OOm |
-        | **필수 보호구** | **[Level A/B/C/D]** + [공기호흡기/내화학복/가스탐지기 등 필수장비] |
-        | **초동 행동수칙** | **[풍상위치 확보]** + [사고상황 맞춤 행동 및 소화/방제/통제 수칙 요약] |
+
+        * **사고물질 및 위험성 판단**: [IMDG 등급 및 핵심위험성(인화성/독성/수반응성 등) 전파 및 위험성 평가 지시]
+        * **통제 및 이격거리 지시**: [초기이격, 화재대피, 유출방호 M단위 수치 명시 및 해역/현장 통제 조치 지시]
+        * **출동세력 보호구 지정**: [필수 레벨(Level A/B/C/D) 및 필수 장비(공기호흡기, 내화학복, 가스탐지기 등) 착용 지시]
+        * **현장 초동 행동 수칙**: [풍상위치 확보, 사고유형 맞춤 행동, 직수금지/소화약제 및 사고선 비상조치 확인 지시]
 
         ---
-        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (EmS/적재방법/주의사항)
-        ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령 (상황실 단계별 대응 및 사고상황 맞춤)
-        ### 3. ⛔ 절대 금지 행동 (금기 사항 - 물 접촉 금지, 직사주수 금지 등)
-        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구/기타)
+        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성
+        ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령
+        ### 3. ⛔ 절대 금지 행동 (금기 사항)
+        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
         candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
@@ -711,7 +717,7 @@ else:
 # ------------------------------------------
 # 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 자유 입력)")
+st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 입력)")
 search_input = st.text_input(
     "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
     key="global_search_box"
@@ -759,6 +765,8 @@ if 'active_chem' in st.session_state:
         status_header += f" ｜ 상황: {accident_ctx}"
     st.error(status_header)
     
+    st.caption("⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS 정보집 DB, HNS 대응가이드를 통합한 RAG(검색증강생성) 모델로 AI 환각(Hallucination) 현상을 최소화했습니다. 단, 현장 상황에 따라 다를 수 있으므로 재확인을 권장합니다.")
+    
     if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
         with st.spinner('공공 API + 해경 HNS DB + Gemini AI 종합 분석 중...'):
             dgst_info = fetch_dgst_info(unno)
@@ -769,6 +777,15 @@ if 'active_chem' in st.session_state:
             rag_search_query = f"{chem} {unno} {accident_ctx} 사고 대응 방제 조치"
             rag_text = fetch_rag_context(rag_search_query)
             
+            # 활용 원본 데이터 세션 저장
+            st.session_state['active_source_data'] = {
+                "dgst": dgst_info,
+                "safety": safety_info,
+                "hns_raw": find_hns_raw_text(unno) or find_hns_raw_text(chem),
+                "rag_text": rag_text,
+                "kosha": kosha_msds_text
+            }
+            
             st.session_state['active_summary'] = generate_gemini_summary(
                 chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_text, accident_context=accident_ctx
             )
@@ -776,8 +793,59 @@ if 'active_chem' in st.session_state:
         
     st.markdown(st.session_state['active_summary'])
     
+    # ------------------------------------------
+    # 📚 활용 원본 자료 확인 탭 (접이식 Expander)
+    # ------------------------------------------
+    if 'active_source_data' in st.session_state:
+        src = st.session_state['active_source_data']
+        with st.expander("📚 생성 정보 출처 및 활용 원본 데이터 검증/보기", expanded=False):
+            t1, t2, t3, t4, t5 = st.tabs([
+                "🚢 해수부 위험물정보", 
+                "🛡️ 화학물질안전원", 
+                "📄 해경 HNS 정보집", 
+                "🧠 해경 HNS 대응가이드",
+                "🏥 안전보건공단 MSDS"
+            ])
+            
+            with t1:
+                st.markdown("**[해양수산부 위험물정보 API 수집 데이터]**")
+                d = src.get("dgst", {})
+                st.write(f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm', '-')})")
+                st.write(f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} / {d.get('kndNm', '-')}")
+                st.write(f"- **비상조치코드(EmS):** {d.get('emergManagtCd', '-')}")
+                st.write(f"- **선박 적재방법:** {d.get('ldadngMth', '-')}")
+                st.write(f"- **주의사항:** {d.get('catinMatter', '-')}")
+
+            with t2:
+                st.markdown("**[화학물질안전원 화학물질 안전관리정보 API 수집 데이터]**")
+                s = src.get("safety", {})
+                st.write(f"- **표적장기 및 주요증상:** {s.get('symptom', '-')}")
+                st.write(f"- **흡입 영향:** {s.get('inhale', '-')}")
+                st.write(f"- **피부 노출:** {s.get('skin', '-')}")
+                st.write(f"- **안구 노출:** {s.get('eyeball', '-')}")
+                st.write(f"- **기타 유의사항:** {s.get('etc', '-')}")
+
+            with t3:
+                st.markdown("**[해양경찰청 HNS 정보집]**")
+                hns_t = src.get("hns_raw")
+                if hns_t:
+                    st.text_area("HNS 정보집 원본 텍스트", value=hns_t[:1500] + ("..." if len(hns_t) > 1500 else ""), height=200, disabled=True)
+                else:
+                    st.info("해당 물질의 HNS 정보집 단일 텍스트 DB 매칭 내역 없음 (API 및 RAG 대체)")
+
+            with t4:
+                st.markdown("**[위험유해물질(HNS) 해양사고 대응 가이드]**")
+                rag_t = src.get("rag_text", "")
+                st.text_area("Vector DB 추출 지침 (k=5)", value=rag_t, height=200, disabled=True)
+
+            with t5:
+                st.markdown("**[안전보건공단 MSDS API 수집 데이터]**")
+                k_t = src.get("kosha", "")
+                st.text_area("MSDS 세부 수집 정보", value=k_t, height=200, disabled=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
-        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_accident_context', 'active_summary', 'active_key_changed']:
+        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_accident_context', 'active_summary', 'active_source_data', 'active_key_changed']:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
