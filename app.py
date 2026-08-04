@@ -525,7 +525,6 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         
         accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
-        # 💡 [줄바꿈 및 개별 불릿 적용 고도화 프롬프트 + 문구 교체]
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
         수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
@@ -550,6 +549,13 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 
         [안전보건공단 MSDS 1~16번 종합 수집 데이터]
         {kosha_msds_text}
+
+        [선박오염방지규칙 제3조 유해액체물질 분류 기준 참고]
+        - X류 물질: 해양에 배출 시 심각한 위해, 해양배출 전면 금지
+        - Y류 물질: 해양에 배출 시 위해 발생, 해양배출 제한
+        - Z류 물질: 해양에 배출 시 경미한 위해, 해양배출 일부 제한
+        - 기타물질 / 잠정평가물질: 위해가 없거나 잠정 평가된 물질
+        (※ HNS 정보집 원본 데이터 등에 X, Y, Z류 오염 범주가 명시되어 있다면 해당 내용을 식별하여 반영하세요.)
 
         [상황실 지침 반영 엄격 작성 규칙]
         1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
@@ -588,7 +594,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 
     except Exception as e:
         return f"Gemini API 클라이언트 생성 오류: {e}"
-
+        
 # ==========================================
 # 4. 항구별 RPA 데이터 로드 (30초 캐시)
 # ==========================================
