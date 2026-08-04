@@ -690,14 +690,14 @@ if kcg_logo_b64:
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
             <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
         </div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응 가이드) + Gemini AI</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응 가이드) + Gemini AI</div>
+        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -753,7 +753,7 @@ if 'active_chem' in st.session_state:
     st.error(status_header)
     
     if 'active_summary' not in st.session_state or st.session_state.get('active_key_changed', False) or not st.session_state['active_summary']:
-        with st.spinner('공공 API + 해경 HNS 정보집 DB + RAG 대응가이드 Vector DB + Gemini AI 종합 분석 중...'):
+        with st.spinner('공공 API + 해경 HNS DB + Gemini AI 종합 분석 중...'):
             dgst_info = fetch_dgst_info(unno)
             safety_info = fetch_chem_safety_info(cas)
             kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
