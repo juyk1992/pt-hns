@@ -453,11 +453,6 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
 # ==========================================
 @st.cache_data(ttl=3600)
 def map_search_query_with_gemini(query_text):
-    """
-    [AI 통합 분석] 화학물질명, 관용명, 화학식뿐만 아니라
-    자유 사고 상황 문장(예: 평택호 좌초 황산 유출 중)을 종합 분석하여 
-    물질 정보와 사고 상황 텍스트를 함께 추출합니다.
-    """
     default_res = {
         "chem_ko": query_text, 
         "chem_eng": query_text, 
@@ -728,8 +723,8 @@ if search_input:
         with c1:
             info_msg = f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`"
             if accident_ctx:
-                info_msg += f"<br>🚨 **사고 상황 식별:** `{accident_ctx}`"
-            st.info(info_msg, icon="💡")
+                info_msg += f"\n🚨 **사고 상황 식별:** `{accident_ctx}`"
+            st.info(info_msg)
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
                 st.session_state['active_chem'] = mapped_ko
