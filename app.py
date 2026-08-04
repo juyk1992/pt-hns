@@ -375,8 +375,8 @@ def fetch_chem_safety_info(cas_no):
     """[화학물질안전원 화학물질 안전관리정보 API]"""
     if not cas_no or cas_no in ["-", "0000", "없음", ""]:
         return {
-            "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음",
-            "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
+            "symptom": "자료없음", "inhale": "자료없음", "skin": "자료없음",
+            "eyeball": "자료없음", "oral": "자료없음", "etc": "자료없음"
         }
 
     clean_cas = str(cas_no).strip()
@@ -384,8 +384,8 @@ def fetch_chem_safety_info(cas_no):
     url = f"https://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
     params = {'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
-        "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음", 
-        "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
+        "symptom": "자료없음", "inhale": "자료없음", "skin": "자료없음", 
+        "eyeball": "자료없음", "oral": "자료없음", "etc": "자료없음"
     }
     try:
         session = requests.Session()
@@ -394,12 +394,12 @@ def fetch_chem_safety_info(cas_no):
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
-            safety_data['symptom'] = item.findtext('symptom') or "자료 없음"
-            safety_data['inhale'] = item.findtext('inhale') or "자료 없음"
-            safety_data['skin'] = item.findtext('skin') or "자료 없음"
-            safety_data['eyeball'] = item.findtext('eyeball') or "자료 없음"
-            safety_data['oral'] = item.findtext('oral') or "자료 없음"
-            safety_data['etc'] = item.findtext('etc') or "자료 없음"
+            safety_data['symptom'] = item.findtext('symptom') or "자료없음"
+            safety_data['inhale'] = item.findtext('inhale') or "자료없음"
+            safety_data['skin'] = item.findtext('skin') or "자료없음"
+            safety_data['eyeball'] = item.findtext('eyeball') or "자료없음"
+            safety_data['oral'] = item.findtext('oral') or "자료없음"
+            safety_data['etc'] = item.findtext('etc') or "자료없음"
     except Exception as e:
         print(f"화학물질 안전관리정보 API 에러: {e}")
     return safety_data
@@ -816,7 +816,7 @@ if 'active_chem' in st.session_state:
             ])
             
             with t1:
-                st.markdown("**[해양수산부 위험물정보 API 수집 데이터]**")
+                st.markdown("**[해양수산부 위험물정보 API]**")
                 d = src.get("dgst", {})
                 st.write(f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm', '-')})")
                 st.write(f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} / {d.get('kndNm', '-')}")
@@ -825,7 +825,7 @@ if 'active_chem' in st.session_state:
                 st.write(f"- **주의사항:** {d.get('catinMatter', '-')}")
 
             with t2:
-                st.markdown("**[화학물질안전원 화학물질 안전관리정보 API 수집 데이터]**")
+                st.markdown("**[화학물질안전원 화학물질안전관리정보 API]**")
                 s = src.get("safety", {})
                 st.write(f"- **표적장기 및 주요증상:** {s.get('symptom', '-')}")
                 st.write(f"- **흡입 영향:** {s.get('inhale', '-')}")
@@ -839,15 +839,15 @@ if 'active_chem' in st.session_state:
                 if hns_t:
                     st.text_area("HNS 정보집 원본 텍스트", value=hns_t[:1500] + ("..." if len(hns_t) > 1500 else ""), height=200, disabled=True)
                 else:
-                    st.info("해당 물질의 HNS 정보집 단일 텍스트 DB 매칭 내역 없음 (API 및 RAG 대체)")
+                    st.info("해당 물질의 HNS 정보집 매칭 내역 없음 (API 및 RAG 대체)")
 
             with t4:
-                st.markdown("**[위험유해물질(HNS) 해양사고 대응 가이드]**")
+                st.markdown("**[해양경찰청 HNS 해양사고 대응 가이드]**")
                 rag_t = src.get("rag_text", "")
                 st.text_area("Vector DB 추출 지침 (k=5)", value=rag_t, height=200, disabled=True)
 
             with t5:
-                st.markdown("**[안전보건공단 MSDS API 수집 데이터]**")
+                st.markdown("**[안전보건공단 MSDS API]**")
                 k_t = src.get("kosha", "")
                 st.text_area("MSDS 세부 수집 정보", value=k_t, height=200, disabled=True)
     
