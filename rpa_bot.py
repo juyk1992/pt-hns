@@ -295,14 +295,19 @@ def run_real_rpa_crawler():
                     use_place = report_info['사용장소']
                     prev_port = report_info['전출항지']
 
-                    # 하역종료일 파싱 및 오늘 이전 데이터 필터링 (조기종료 없이 스킵 후 계속 진행)
-                    end_date_clean = re.sub(r'[^0-9]', '', haeyuk_end)[:8]
+                    # 하역종료일 및 시간 파싱 (예: '2026-08-02 18:00' 형태)
+                    end_clean_str = re.sub(r'[^0-9]', '', str(haeyuk_end))[:12]  # 숫자만 추출하여 최대 12자리(YYYYMMDDHHMM) 확보
                     
-                    if end_date_clean and len(end_date_clean) == 8:
+                    if len(end_clean_str) >= 12:
                         try:
-                            end_date_obj = datetime.strptime(end_date_clean, "%Y%m%d").date()
-                            if end_date_obj < today_date:
-                                print(f"⏭️ [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} ➔ 하역종료일({end_date_clean})이 오늘 이전이므로 스킵")
+                            # '202608021800' 형식을 datetime 객체로 변환
+                            end_dt_obj = datetime.strptime(end_clean_str[:12], "%Y%m%d%H%M")
+                            
+                            # 현재 시간 기준 정확히 24시간 이전 시점 계산
+                            cutoff_dt = datetime.now() - timedelta(hours=24)
+                            
+                            if end_dt_obj < cutoff_dt:
+                                print(f"⏭️ [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} ➔ 하역종료시각({haeyuk_end})이 현재 기준 24시간 이전이므로 스킵")
                                 # 목록 탭 복귀
                                 driver.execute_script("""
                                     var listTab = document.querySelector('[id*="_tabDgst_tab_tabs0_tabHTML"]');
@@ -311,7 +316,7 @@ def run_real_rpa_crawler():
                                 time.sleep(2.0)
                                 continue  # 스킵 후 다음 선박 탐색 계속 진행!
                         except Exception as dt_err:
-                            print(f"⚠️ 날짜 변환 오류 (계속 진행): {dt_err}")
+                            print(f"⚠️ 날짜/시간 파싱 오류 (계속 진행): {dt_err}")
 
                     print(f"📌 [{port_name} | {page_idx}p-{row_idx+1}행] {ship_name} (호출부호: {call_sign}) 상세 수집 진입")
 
