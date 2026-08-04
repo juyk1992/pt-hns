@@ -701,7 +701,7 @@ if kcg_logo_b64:
 else:
     st.markdown("""
     <div class="hero-container">
-        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템</div>
+        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
         <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
@@ -769,6 +769,15 @@ if 'active_chem' in st.session_state:
             rag_search_query = f"{chem} {unno} {accident_ctx} 사고 대응 방제 조치"
             rag_text = fetch_rag_context(rag_search_query)
             
+            # 💡 [추가] 활용 원본 데이터 세션 저장
+            st.session_state['active_source_data'] = {
+                "dgst": dgst_info,
+                "safety": safety_info,
+                "hns_raw": find_hns_raw_text(unno) or find_hns_raw_text(chem),
+                "rag_text": rag_text,
+                "kosha": kosha_msds_text
+            }
+            
             st.session_state['active_summary'] = generate_gemini_summary(
                 chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_text, accident_context=accident_ctx
             )
@@ -776,8 +785,59 @@ if 'active_chem' in st.session_state:
         
     st.markdown(st.session_state['active_summary'])
     
+    # ------------------------------------------
+    # 📚 [신규] 활용 원본 자료 확인 탭 (접이식 Expander)
+    # ------------------------------------------
+    if 'active_source_data' in st.session_state:
+        src = st.session_state['active_source_data']
+        with st.expander("📚 생성 정보 출처 및 활용 원본 데이터 검증/보기", expanded=False):
+            t1, t2, t3, t4, t5 = st.tabs([
+                "🚢 해수부 위험물정보", 
+                "🛡️ 화학물질안전원", 
+                "📄 해경 HNS 정보집", 
+                "🧠 해경 대응가이드 RAG",
+                "🏥 안전보건공단 MSDS"
+            ])
+            
+            with t1:
+                st.markdown("**[해양수산부 위험물정보 API 수집 데이터]**")
+                d = src.get("dgst", {})
+                st.write(f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm', '-')})")
+                st.write(f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} / {d.get('kndNm', '-')}")
+                st.write(f"- **비상조치코드(EmS):** {d.get('emergManagtCd', '-')}")
+                st.write(f"- **선박 적재방법:** {d.get('ldadngMth', '-')}")
+                st.write(f"- **주의사항:** {d.get('catinMatter', '-')}")
+
+            with t2:
+                st.markdown("**[화학물질안전원 안전관리정보 API 수집 데이터]**")
+                s = src.get("safety", {})
+                st.write(f"- **표적장기 및 주요증상:** {s.get('symptom', '-')}")
+                st.write(f"- **흡입 영향:** {s.get('inhale', '-')}")
+                st.write(f"- **피부 노출:** {s.get('skin', '-')}")
+                st.write(f"- **안구 노출:** {s.get('eyeball', '-')}")
+                st.write(f"- **기타 유의사항:** {s.get('etc', '-')}")
+
+            with t3:
+                st.markdown("**[해양경찰청 HNS 정보집 원본 데이터]**")
+                hns_t = src.get("hns_raw")
+                if hns_t:
+                    st.text_area("HNS 정보집 원본 텍스트", value=hns_t[:1500] + ("..." if len(hns_t) > 1500 else ""), height=200, disabled=True)
+                else:
+                    st.info("해당 물질의 HNS 정보집 단일 텍스트 DB 매칭 내역 없음 (API 및 RAG 대체)")
+
+            with t4:
+                st.markdown("**[해양유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 지침]**")
+                rag_t = src.get("rag_text", "")
+                st.text_area("Vector DB 추출 지침 (k=5)", value=rag_t, height=200, disabled=True)
+
+            with t5:
+                st.markdown("**[안전보건공단 MSDS API 1~16번 항목 데이터]**")
+                k_t = src.get("kosha", "")
+                st.text_area("MSDS 세부 수집 정보", value=k_t, height=200, disabled=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
-        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_accident_context', 'active_summary', 'active_key_changed']:
+        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_accident_context', 'active_summary', 'active_source_data', 'active_key_changed']:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
