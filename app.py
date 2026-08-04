@@ -330,12 +330,20 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈
+# 2. 공공 API 연동 모듈 (인증키 및 규격 보완)
 # ==========================================
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
-    url = "http://apis.data.go.kr/1192000/DgstInqire3/Info"
-    params = {'serviceKey': PUBLIC_API_KEY, 'unno': unno, 'numOfRows': '1', 'pageNo': '1'}
+    if not unno or unno in ["0000", "-", ""]:
+        return {
+            "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
+            "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
+        }
+
+    clean_unno = str(unno).strip().zfill(4)
+    # 💡 serviceKey 인증키 이중 인코딩 방지를 위한 직접 결합
+    url = f"http://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
+    params = {'unno': clean_unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
         "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
         "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
@@ -359,16 +367,16 @@ def fetch_dgst_info(unno):
 
 def fetch_chem_safety_info(cas_no):
     """[화학물질안전원 화학물질 안전관리정보 API]"""
-    url = "http://apis.data.go.kr/1480802/iciskischem/kischemlist"
-    
-    if not cas_no or cas_no in ["-", "0000", "없음"]:
+    if not cas_no or cas_no in ["-", "0000", "없음", ""]:
         return {
             "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음",
             "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
         }
 
     clean_cas = str(cas_no).strip()
-    params = {'serviceKey': PUBLIC_API_KEY, 'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
+    # 💡 serviceKey 인증키 이중 인코딩 방지를 위한 직접 결합
+    url = f"http://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
+    params = {'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
         "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음", 
         "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
@@ -511,7 +519,6 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         
         accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
-        # 💡 [줄바꿈 및 개별 불릿 적용 고도화 프롬프트]
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
         수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
@@ -538,7 +545,10 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         {kosha_msds_text}
 
         [상황실 지침 반영 엄격 작성 규칙]
-        1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
+        1. [문체 및 형식 - 초동대응 핵심요약]: 
+           - 표(Table) 형식을 절대 사용하지 마세요.
+           - 각 지시 항목은 반드시 **각자 독립된 새 줄(Enter)**로 작성하세요. 가로 한 줄로 길게 이어붙이는 작성을 엄격히 금지합니다.
+           - 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 상황실 지시문체('~지시', '~확인', '~조치', '~전파' 등)로 간결한 개조식 문장으로 작성하세요.
         2. [수치 및 안전 기준]: 
            - 이격거리 및 보호구 등 핵심 수치는 **해경 HNS 대응가이드(RAG) 및 HNS 정보집 DB 수치를 최우선 반영**하세요.
            - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
@@ -548,7 +558,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 
         --- 출력 형식을 엄격히 준수하세요 (항목 간 반드시 엔터로 줄바꿈) ---
 
-        ### 🚨 [초동대응 핵심요약]
+        ### 🚨 [초동대응 핵심요약 - 상황실 긴급지시]
 
         * **사고물질 및 위험성 판단**: [IMDG 등급 및 핵심위험성(인화성/독성/수반응성 등) 전파 및 위험성 평가 지시]
         * **통제 및 이격거리 지시**: [초기이격, 화재대피, 유출방호 M단위 수치 명시 및 해역/현장 통제 조치 지시]
@@ -701,7 +711,7 @@ if kcg_logo_b64:
 else:
     st.markdown("""
     <div class="hero-container">
-        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
+        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템</div>
         <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
@@ -709,7 +719,7 @@ else:
 # ------------------------------------------
 # 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 입력)")
+st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 자유 입력)")
 search_input = st.text_input(
     "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
     key="global_search_box"
@@ -769,7 +779,7 @@ if 'active_chem' in st.session_state:
             rag_search_query = f"{chem} {unno} {accident_ctx} 사고 대응 방제 조치"
             rag_text = fetch_rag_context(rag_search_query)
             
-            # 💡 [추가] 활용 원본 데이터 세션 저장
+            # 💡 활용 원본 데이터 세션 저장
             st.session_state['active_source_data'] = {
                 "dgst": dgst_info,
                 "safety": safety_info,
@@ -786,7 +796,7 @@ if 'active_chem' in st.session_state:
     st.markdown(st.session_state['active_summary'])
     
     # ------------------------------------------
-    # 📚 [신규] 활용 원본 자료 확인 탭 (접이식 Expander)
+    # 📚 활용 원본 자료 확인 탭 (접이식 Expander)
     # ------------------------------------------
     if 'active_source_data' in st.session_state:
         src = st.session_state['active_source_data']
