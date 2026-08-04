@@ -25,7 +25,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python scripts/build_rag_db.py
+          python build_rag_db.py
 
       - name: Commit and Push Vector DB Folder
         run: |
