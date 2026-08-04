@@ -313,24 +313,21 @@ kcg_vectorstore = load_kcg_vectorstore()
 def fetch_rag_context(query, k=3):
     """해양사고 대응 가이드 PDF에서 연관 지침 RAG 검색"""
     if not kcg_vectorstore or not query:
-        return {"context": "RAG 가이드 데이터베이스 미생성", "docs": []}
+        return "RAG 가이드 데이터베이스 미생성"
     
     try:
         docs = kcg_vectorstore.similarity_search(query, k=k)
         if not docs:
-            return {"context": "관련 가이드 지침 검색 결과 없음", "docs": []}
+            return "관련 가이드 지침 검색 결과 없음"
         
         context_items = []
         for doc in docs:
             page = doc.metadata.get('page', 0) + 1
             context_items.append(f"[대응가이드 {page}쪽 지침]\n{doc.page_content}")
             
-        return {
-            "context": "\n\n".join(context_items),
-            "docs": docs
-        }
+        return "\n\n".join(context_items)
     except Exception as e:
-        return {"context": f"RAG 검색 오류: {e}", "docs": []}
+        return f"RAG 검색 오류: {e}"
 
 # ==========================================
 # 2. 공공 API 연동 모듈
@@ -467,7 +464,8 @@ def map_search_query_with_gemini(query_text):
         {{"chem_ko": "공식 한글명", "chem_eng": "공식 영문명", "unno": "4자리 UN번호", "cas_no": "CAS번호(예: 7664-93-9)"}}
         """
         
-        candidate_models = ['gemini-2.5-flash', 'gemini-1.5-flash']
+        # 📌 고정된 모델 우선순위: 3.6 flash -> 3.5 flash lite -> 3.5 flash
+        candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
         for model_id in candidate_models:
             try:
                 response = client.models.generate_content(model=model_id, contents=prompt)
@@ -480,7 +478,7 @@ def map_search_query_with_gemini(query_text):
     except Exception:
         return {"chem_ko": query_text, "chem_eng": query_text, "unno": "0000", "cas_no": "-"}
 
-def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_data):
+def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_text):
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
         
@@ -489,7 +487,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         hns_raw_text = find_hns_raw_text(unno) or find_hns_raw_text(chem_name)
         hns_context = f"[해양경찰청 HNS 정보집 원본 데이터]\n{hns_raw_text}\n" if hns_raw_text else ""
 
-        rag_context = f"[위험유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 결과]\n{rag_data.get('context', '')}\n"
+        rag_context = f"[위험유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 결과]\n{rag_text}\n"
 
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
@@ -536,7 +534,8 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치 (흡입/피부/안구/경구/기타)
         """
 
-        candidate_models = ['gemini-2.5-flash', 'gemini-1.5-flash']
+        # 📌 고정된 모델 우선순위: 3.6 flash -> 3.5 flash lite -> 3.5 flash
+        candidate_models = ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']
         for model_id in candidate_models:
             try:
                 response = client.models.generate_content(model=model_id, contents=prompt)
@@ -655,7 +654,6 @@ def render_port_dashboard(port_name, port_code):
                             st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                             st.session_state['active_ship'] = f"[{port_name}] {ship}"
                             st.session_state['active_summary'] = ""
-                            st.session_state['active_rag_docs'] = []
                             st.session_state['active_key_changed'] = True
                             st.rerun()
 
@@ -707,7 +705,6 @@ if search_input:
                 st.session_state['active_cas'] = mapped_cas
                 st.session_state['active_ship'] = f"자유 통합 검색 ('{search_input}')"
                 st.session_state['active_summary'] = ""
-                st.session_state['active_rag_docs'] = []
                 st.session_state['active_key_changed'] = True
                 st.rerun()
 
@@ -729,28 +726,18 @@ if 'active_chem' in st.session_state:
             safety_info = fetch_chem_safety_info(cas)
             kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
             
-            # RAG Vector DB 검색 수행
-            rag_data = fetch_rag_context(f"{chem} {unno} 사고 대응 및 방제 조치")
-            st.session_state['active_rag_docs'] = rag_data.get('docs', [])
+            # RAG Vector DB 검색 수행 (결과는 프롬프트 지침으로만 전달됨)
+            rag_text = fetch_rag_context(f"{chem} {unno} 사고 대응 및 방제 조치")
             
             st.session_state['active_summary'] = generate_gemini_summary(
-                chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_data
+                chem, unno, cas, dgst_info, safety_info, kosha_msds_text, rag_text
             )
             st.session_state['active_key_changed'] = False
         
     st.markdown(st.session_state['active_summary'])
     
-    # 📚 RAG 참조 원문 표시 기능
-    if st.session_state.get('active_rag_docs'):
-        with st.expander("📚 [참조] 해양유해물질(HNS) 해양사고 대응 가이드 PDF 원문 검색 지침 보기", expanded=False):
-            for i, doc in enumerate(st.session_state['active_rag_docs'], 1):
-                page = doc.metadata.get('page', 0) + 1
-                st.markdown(f"**📄 [참조 {i}] 가이드 약 {page}쪽**")
-                st.caption(doc.page_content)
-                st.markdown("---")
-    
     if st.button("❌ 가이드 창 닫기", key="close_global_guide", use_container_width=True):
-        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_summary', 'active_rag_docs', 'active_key_changed']:
+        for key in ['active_chem', 'active_unno', 'active_cas', 'active_ship', 'active_summary', 'active_key_changed']:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
