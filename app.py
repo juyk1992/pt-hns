@@ -848,7 +848,7 @@ if 'active_chem' in st.session_state:
             with t4:
                 st.markdown("**[해양경찰청 HNS 해양사고 대응 가이드]**")
                 rag_t = src.get("rag_text", "")
-                st.text_area("Vector DB 추출 지침 (k=5)", value=rag_t, height=200, disabled=True)
+                st.text_area("대응 가이드 Vector DB", value=rag_t, height=200, disabled=True)
 
             with t5:
                 st.markdown("**[안전보건공단 MSDS API]**")
