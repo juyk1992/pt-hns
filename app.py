@@ -310,7 +310,7 @@ def load_kcg_vectorstore():
 
 kcg_vectorstore = load_kcg_vectorstore()
 
-def fetch_rag_context(query, k=3):
+def fetch_rag_context(query, k=5):
     """해양사고 대응 가이드 PDF에서 연관 지침 RAG 검색"""
     if not kcg_vectorstore or not query:
         return "RAG 가이드 데이터베이스 미생성"
