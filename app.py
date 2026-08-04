@@ -5,12 +5,16 @@ import xml.etree.ElementTree as ET
 import os
 import json
 import base64
+import urllib3
 from datetime import datetime, timedelta
 from google import genai
 
 # RAG Vector DB 연동 라이브러리
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+
+# SSL 경고창 비활성화
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
 # 0. 로컬 이미지 경로 및 Base64 변환 함수
@@ -330,7 +334,7 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (API 활용가이드 규격 반영)
+# 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
 # ==========================================
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
@@ -341,26 +345,27 @@ def fetch_dgst_info(unno):
         }
 
     clean_unno = str(unno).strip().zfill(4)
-    # 💡 인증키 URL 이중 인코딩 방지 처리
-    url = f"http://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
+    url = f"https://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
     params = {'unno': clean_unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
         "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
         "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
     }
     try:
-        res = requests.get(url, params=params, timeout=5)
+        session = requests.Session()
+        session.verify = False
+        res = session.get(url, params=params, timeout=8)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
-            info['imdgNm'] = item.findtext('imdgNm', '')
-            info['imdgEngNm'] = item.findtext('imdgEngNm', '')
-            info['kndNm'] = item.findtext('kndNm', '-')
-            info['kndPrdlstNm'] = item.findtext('kndPrdlstNm', '-')
-            info['imdgGradCd'] = item.findtext('imdgGradCd', '-')
-            info['emergManagtCd'] = item.findtext('emergManagtCd', '-')
-            info['ldadngMth'] = item.findtext('ldadngMth', '-')
-            info['catinMatter'] = item.findtext('catinMatter', '-')
+            info['imdgNm'] = item.findtext('imdgNm') or ""
+            info['imdgEngNm'] = item.findtext('imdgEngNm') or ""
+            info['kndNm'] = item.findtext('kndNm') or "-"
+            info['kndPrdlstNm'] = item.findtext('kndPrdlstNm') or "-"
+            info['imdgGradCd'] = item.findtext('imdgGradCd') or "-"
+            info['emergManagtCd'] = item.findtext('emergManagtCd') or "-"
+            info['ldadngMth'] = item.findtext('ldadngMth') or "-"
+            info['catinMatter'] = item.findtext('catinMatter') or "-"
     except Exception as e:
         print(f"위험물정보 API 에러: {e}")
     return info
@@ -369,29 +374,30 @@ def fetch_chem_safety_info(cas_no):
     """[화학물질안전원 화학물질 안전관리정보 API]"""
     if not cas_no or cas_no in ["-", "0000", "없음", ""]:
         return {
-            "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음",
-            "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
+            "symptom": "자료없음", "inhale": "자료없음", "skin": "자료없음",
+            "eyeball": "자료없음", "oral": "자료없음", "etc": "자료없음"
         }
 
     clean_cas = str(cas_no).strip()
-    # 💡 인증키 URL 이중 인코딩 방지 처리
-    url = f"http://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
+    url = f"https://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
     params = {'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
-        "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음", 
-        "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
+        "symptom": "자료없음", "inhale": "자료없음", "skin": "자료없음", 
+        "eyeball": "자료없음", "oral": "자료없음", "etc": "자료없음"
     }
     try:
-        res = requests.get(url, params=params, timeout=5)
+        session = requests.Session()
+        session.verify = False
+        res = session.get(url, params=params, timeout=8)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
-            safety_data['symptom'] = item.findtext('symptom', '자료 없음')
-            safety_data['inhale'] = item.findtext('inhale', '자료 없음')
-            safety_data['skin'] = item.findtext('skin', '자료 없음')
-            safety_data['eyeball'] = item.findtext('eyeball', '자료 없음')
-            safety_data['oral'] = item.findtext('oral', '자료 없음')
-            safety_data['etc'] = item.findtext('etc', '자료 없음')
+            safety_data['symptom'] = item.findtext('symptom') or "자료없음"
+            safety_data['inhale'] = item.findtext('inhale') or "자료없음"
+            safety_data['skin'] = item.findtext('skin') or "자료없음"
+            safety_data['eyeball'] = item.findtext('eyeball') or "자료없음"
+            safety_data['oral'] = item.findtext('oral') or "자료없음"
+            safety_data['etc'] = item.findtext('etc') or "자료없음"
     except Exception as e:
         print(f"화학물질 안전관리정보 API 에러: {e}")
     return safety_data
@@ -444,8 +450,8 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
             for item in items:
-                name_kor = item.findtext('msdsItemNameKor', '').strip()
-                detail_val = item.findtext('itemDetail', '').strip()
+                name_kor = (item.findtext('msdsItemNameKor') or '').strip()
+                detail_val = (item.findtext('itemDetail') or '').strip()
                 if detail_val and detail_val != "자료없음":
                     msds_details.append(f"[{name_kor}] {detail_val}")
         except Exception:
@@ -519,7 +525,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         
         accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
-        # 💡 [줄바꿈 및 개별 불릿 적용 고도화 프롬프트]
+        # 💡 [줄바꿈 및 개별 불릿 적용 고도화 프롬프트 + 문구 교체]
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
         수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
@@ -548,7 +554,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         [상황실 지침 반영 엄격 작성 규칙]
         1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
         2. [수치 및 안전 기준]: 
-           - 이격거리 및 보호구 등 핵심 수치는 **해경 HNS 대응가이드(RAG) 및 HNS 정보집 DB 수치를 최우선 반영**하세요.
+           - 이격거리 및 보호구 등 핵심 수치는 MSDS/물질정보집 참조 및 해경 HNS 대응가이드(RAG) 수치를 최우선 반영하세요.
            - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
            - 물 반응성 물질 확인 시 직사주수 절대 금지를 명시하세요.
         3. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우(화재·폭발, 유출, 충돌·침수, 좌초 등), 해당 사고 유형별 비상조치 지원 지침을 최우선 지시사항으로 포함하세요.
@@ -808,7 +814,7 @@ if 'active_chem' in st.session_state:
             ])
             
             with t1:
-                st.markdown("**[해양수산부 위험물정보 API 수집 데이터]**")
+                st.markdown("**[해양수산부 위험물정보 API]**")
                 d = src.get("dgst", {})
                 st.write(f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm', '-')})")
                 st.write(f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} / {d.get('kndNm', '-')}")
@@ -817,7 +823,7 @@ if 'active_chem' in st.session_state:
                 st.write(f"- **주의사항:** {d.get('catinMatter', '-')}")
 
             with t2:
-                st.markdown("**[화학물질안전원 화학물질 안전관리정보 API 수집 데이터]**")
+                st.markdown("**[화학물질안전원 화학물질안전관리정보 API]**")
                 s = src.get("safety", {})
                 st.write(f"- **표적장기 및 주요증상:** {s.get('symptom', '-')}")
                 st.write(f"- **흡입 영향:** {s.get('inhale', '-')}")
@@ -831,15 +837,15 @@ if 'active_chem' in st.session_state:
                 if hns_t:
                     st.text_area("HNS 정보집 원본 텍스트", value=hns_t[:1500] + ("..." if len(hns_t) > 1500 else ""), height=200, disabled=True)
                 else:
-                    st.info("해당 물질의 HNS 정보집 단일 텍스트 DB 매칭 내역 없음 (API 및 RAG 대체)")
+                    st.info("해당 물질의 HNS 정보집 매칭 내역 없음")
 
             with t4:
-                st.markdown("**[위험유해물질(HNS) 해양사고 대응 가이드]**")
+                st.markdown("**[해양경찰청 HNS 해양사고 대응 가이드]**")
                 rag_t = src.get("rag_text", "")
                 st.text_area("Vector DB 추출 지침 (k=5)", value=rag_t, height=200, disabled=True)
 
             with t5:
-                st.markdown("**[안전보건공단 MSDS API 수집 데이터]**")
+                st.markdown("**[안전보건공단 MSDS API]**")
                 k_t = src.get("kosha", "")
                 st.text_area("MSDS 세부 수집 정보", value=k_t, height=200, disabled=True)
     
