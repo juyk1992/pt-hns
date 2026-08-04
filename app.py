@@ -5,12 +5,16 @@ import xml.etree.ElementTree as ET
 import os
 import json
 import base64
+import urllib3
 from datetime import datetime, timedelta
 from google import genai
 
 # RAG Vector DB 연동 라이브러리
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
+
+# SSL 경고창 비활성화
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
 # 0. 로컬 이미지 경로 및 Base64 변환 함수
@@ -330,7 +334,7 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (API 활용가이드 규격 반영)
+# 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
 # ==========================================
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
@@ -341,26 +345,28 @@ def fetch_dgst_info(unno):
         }
 
     clean_unno = str(unno).strip().zfill(4)
-    # 💡 인증키 URL 이중 인코딩 방지 처리
-    url = f"http://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
+    # 💡 HTTPS 적용 및 인증키 URL 결합
+    url = f"https://apis.data.go.kr/1192000/DgstInqire3/Info?serviceKey={PUBLIC_API_KEY}"
     params = {'unno': clean_unno, 'numOfRows': '1', 'pageNo': '1'}
     info = {
         "imdgNm": "", "imdgEngNm": "", "kndNm": "-", "kndPrdlstNm": "-",
         "imdgGradCd": "-", "emergManagtCd": "-", "ldadngMth": "-", "catinMatter": "-"
     }
     try:
-        res = requests.get(url, params=params, timeout=5)
+        session = requests.Session()
+        session.verify = False
+        res = session.get(url, params=params, timeout=8)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
-            info['imdgNm'] = item.findtext('imdgNm', '')
-            info['imdgEngNm'] = item.findtext('imdgEngNm', '')
-            info['kndNm'] = item.findtext('kndNm', '-')
-            info['kndPrdlstNm'] = item.findtext('kndPrdlstNm', '-')
-            info['imdgGradCd'] = item.findtext('imdgGradCd', '-')
-            info['emergManagtCd'] = item.findtext('emergManagtCd', '-')
-            info['ldadngMth'] = item.findtext('ldadngMth', '-')
-            info['catinMatter'] = item.findtext('catinMatter', '-')
+            info['imdgNm'] = item.findtext('imdgNm') or ""
+            info['imdgEngNm'] = item.findtext('imdgEngNm') or ""
+            info['kndNm'] = item.findtext('kndNm') or "-"
+            info['kndPrdlstNm'] = item.findtext('kndPrdlstNm') or "-"
+            info['imdgGradCd'] = item.findtext('imdgGradCd') or "-"
+            info['emergManagtCd'] = item.findtext('emergManagtCd') or "-"
+            info['ldadngMth'] = item.findtext('ldadngMth') or "-"
+            info['catinMatter'] = item.findtext('catinMatter') or "-"
     except Exception as e:
         print(f"위험물정보 API 에러: {e}")
     return info
@@ -374,24 +380,26 @@ def fetch_chem_safety_info(cas_no):
         }
 
     clean_cas = str(cas_no).strip()
-    # 💡 인증키 URL 이중 인코딩 방지 처리
-    url = f"http://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
+    # 💡 HTTPS 적용 및 인증키 URL 결합
+    url = f"https://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}"
     params = {'numOfRows': '3', 'pageNo': '1', 'casNo': clean_cas}
     safety_data = {
         "symptom": "자료 없음", "inhale": "자료 없음", "skin": "자료 없음", 
         "eyeball": "자료 없음", "oral": "자료 없음", "etc": "자료 없음"
     }
     try:
-        res = requests.get(url, params=params, timeout=5)
+        session = requests.Session()
+        session.verify = False
+        res = session.get(url, params=params, timeout=8)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
-            safety_data['symptom'] = item.findtext('symptom', '자료 없음')
-            safety_data['inhale'] = item.findtext('inhale', '자료 없음')
-            safety_data['skin'] = item.findtext('skin', '자료 없음')
-            safety_data['eyeball'] = item.findtext('eyeball', '자료 없음')
-            safety_data['oral'] = item.findtext('oral', '자료 없음')
-            safety_data['etc'] = item.findtext('etc', '자료 없음')
+            safety_data['symptom'] = item.findtext('symptom') or "자료 없음"
+            safety_data['inhale'] = item.findtext('inhale') or "자료 없음"
+            safety_data['skin'] = item.findtext('skin') or "자료 없음"
+            safety_data['eyeball'] = item.findtext('eyeball') or "자료 없음"
+            safety_data['oral'] = item.findtext('oral') or "자료 없음"
+            safety_data['etc'] = item.findtext('etc') or "자료 없음"
     except Exception as e:
         print(f"화학물질 안전관리정보 API 에러: {e}")
     return safety_data
@@ -444,8 +452,8 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
             for item in items:
-                name_kor = item.findtext('msdsItemNameKor', '').strip()
-                detail_val = item.findtext('itemDetail', '').strip()
+                name_kor = (item.findtext('msdsItemNameKor') or '').strip()
+                detail_val = (item.findtext('itemDetail') or '').strip()
                 if detail_val and detail_val != "자료없음":
                     msds_details.append(f"[{name_kor}] {detail_val}")
         except Exception:
@@ -519,7 +527,6 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         
         accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
 
-        # 💡 [줄바꿈 및 개별 불릿 적용 고도화 프롬프트]
         prompt = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
         수집된 다중 데이터(공공 API, HNS DB, 해경 대응가이드 RAG) 및 [해상화학사고 상황실 대응절차 가이드]를 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
