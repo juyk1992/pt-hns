@@ -125,65 +125,6 @@ st.markdown("""
         font-size: 0.85rem;
     }
 
-    div[data-testid="stRadio"] > label {
-        display: none !important;
-    }
-
-    div[data-testid="stRadio"] > div {
-        display: grid !important;
-        grid-template-rows: repeat(2, 38px) !important;
-        grid-auto-flow: column !important;
-        grid-auto-columns: max-content !important;
-        gap: 8px 8px !important;
-        overflow-x: auto !important;
-        overflow-y: hidden !important;
-        padding-bottom: 8px !important;
-        -webkit-overflow-scrolling: touch !important;
-    }
-
-    div[data-testid="stRadio"] > div::-webkit-scrollbar {
-        height: 5px !important;
-    }
-    div[data-testid="stRadio"] > div::-webkit-scrollbar-track {
-        background: var(--bg-sub) !important;
-        border-radius: 10px !important;
-    }
-    div[data-testid="stRadio"] > div::-webkit-scrollbar-thumb {
-        background: var(--border-color) !important;
-        border-radius: 10px !important;
-    }
-
-    div[data-testid="stRadio"] > div > label {
-        height: 38px !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        background-color: var(--bg-card) !important;
-        border: 1.5px solid var(--border-color) !important;
-        border-radius: 20px !important;
-        padding: 0 16px !important;
-        color: var(--text-main) !important;
-        font-weight: 600 !important;
-        font-size: 0.88rem !important;
-        cursor: pointer !important;
-        white-space: nowrap !important;
-    }
-
-    div[data-testid="stRadio"] > div > label > div:first-child {
-        display: none !important;
-    }
-
-    div[data-testid="stRadio"] > div > label[data-checked="true"],
-    div[data-testid="stRadio"] > div > label:has(input:checked) {
-        background-color: var(--accent-blue) !important;
-        border-color: var(--accent-blue) !important;
-        color: #FFFFFF !important;
-    }
-
-    div[data-testid="stRadio"] > div > label[data-checked="true"] *,
-    div[data-testid="stRadio"] > div > label:has(input:checked) * {
-        color: #FFFFFF !important;
-    }
-
     .stTextInput input {
         background-color: var(--bg-card) !important;
         border: 1px solid var(--border-color) !important;
@@ -257,11 +198,6 @@ st.markdown("""
 
     .stTabs [data-baseweb="tab-highlight"] {
         display: none !important;
-    }
-
-    [data-testid="stMetricValue"] {
-        color: var(--accent-blue) !important;
-        font-weight: 800 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -623,119 +559,9 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 
     except Exception as e:
         return f"Gemini API 클라이언트 생성 오류: {e}"
-        
-# ==========================================
-# 4. 항구별 RPA 데이터 로드 (30초 캐시)
-# ==========================================
-@st.cache_data(ttl=30)
-def load_integrated_hns_data(port_code):
-    filename_map = {
-        "031": "hns_pyeongtaek_report.csv",
-        "300": "hns_daesan_report.csv"
-    }
-    
-    file_path = filename_map.get(port_code, "hns_pyeongtaek_report.csv")
-    if os.path.exists(file_path):
-        df = pd.read_csv(file_path)
-        df.columns = df.columns.str.strip()
-        df['호출부호'] = df['호출부호'].astype(str).str.strip()
-        df['선박명(선택)'] = df['선박명(선택)'].astype(str).str.strip()
-        return df
-    return None
 
 # ==========================================
-# 5. 항구별 데이터 렌더링 헬퍼 함수
-# ==========================================
-def render_port_dashboard(port_name, port_code):
-    kst_now = datetime.utcnow() + timedelta(hours=9)
-    today_str = kst_now.strftime("%Y-%m-%d")
-    from_str = (kst_now - timedelta(days=3)).strftime("%Y-%m-%d")
-    
-    df = load_integrated_hns_data(port_code)
-
-    col_title, col_metric = st.columns([3, 1])
-    with col_title:
-        st.markdown(f"#### 📊 {port_name} 위험물 반입 현황")
-        st.caption(f"조회기간: {from_str} ~ {today_str}")
-
-    if df is None or df.empty:
-        st.warning(f"⚠️ {port_name}의 {from_str} ~ {today_str} 기준 수집 데이터가 없습니다. RPA 봇을 가동해 주세요.")
-    else:
-        ship_column = "선박명(선택)" if "선박명(선택)" in df.columns else df.columns[0]
-        unique_ships = sorted([str(s) for s in df[ship_column].dropna().unique()])
-        ship_options = ["전체 보기"] + unique_ships
-        
-        st.markdown(f"**🚢 [{port_name}] 조회할 선박 선택**")
-        selected_ship = st.radio(
-            label=f"ship_radio_{port_code}",
-            options=ship_options,
-            index=0,
-            horizontal=True,
-            key=f"select_ship_radio_{port_code}"
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        if selected_ship != "전체 보기":
-            filtered_df = df[df[ship_column] == selected_ship]
-        else:
-            filtered_df = df
-
-        with col_metric:
-            st.metric(label="반입 신고 건수", value=f"{len(filtered_df)} 건")
-
-        display_cols = [
-            '선박명(선택)', '호출부호', '사용목적', '운송형태', '화물명', 
-            '하역업체', '하역기간', '사용장소', '전출항지', 'UNNO', 'IMDG', '품명', '중량', '단위'
-        ]
-        
-        with st.expander(f"📋 {port_name} 위험물 반입 신고 목록 데이터 보기", expanded=False):
-            st.dataframe(filtered_df[[c for c in display_cols if c in filtered_df.columns]], use_container_width=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(f"##### 🚢 {port_name} 선박별 상세 운송 정보 및 AI 비상 대응")
-
-        for ship in filtered_df['선박명(선택)'].unique():
-            ship_data = filtered_df[filtered_df['선박명(선택)'] == ship]
-            call_sign = ship_data['호출부호'].iloc[0]
-            location = ship_data['사용장소'].iloc[0] if pd.notna(ship_data['사용장소'].iloc[0]) else "장소 미상"
-            work_period = ship_data['하역기간'].iloc[0]
-            use_purpose = ship_data['사용목적'].iloc[0] if '사용목적' in ship_data.columns else "-"
-            transport_type = ship_data['운송형태'].iloc[0] if '운송형태' in ship_data.columns else "-"
-            prev_port = ship_data['전출항지'].iloc[0] if '전출항지' in ship_data.columns else "-"
-            
-            with st.expander(f"⚓ [{ship}] (호출부호: {call_sign}) ｜ 하역장소: {location} ｜ 기간: {work_period}"):
-                st.markdown(f"**🏢 하역업체:** {ship_data['하역업체'].iloc[0]} &nbsp;\|&nbsp; **사용목적:** {use_purpose} &nbsp;\|&nbsp; **운송형태:** {transport_type} &nbsp;\|&nbsp; **전출항지:** {prev_port}")
-                st.markdown("---")
-                st.markdown("###### 📦 적재 위험물 목록")
-                
-                for idx, row in ship_data.iterrows():
-                    unno = str(row['UNNO']).zfill(4) if pd.notna(row['UNNO']) else "0000"
-                    chem_name = str(row['품명']) if pd.notna(row['품명']) else "정보 없음"
-                    weight = str(row['중량']) if pd.notna(row['중량']) else "-"
-                    unit = str(row['단위']) if pd.notna(row['단위']) else ""
-                    imdg = str(row['IMDG']) if 'IMDG' in row and pd.notna(row['IMDG']) else "-"
-                    
-                    if unno == '0000' or not unno.strip():
-                        continue
-                    
-                    c_info, c_btn = st.columns([4, 1])
-                    with c_info:
-                        st.markdown(f"• <span class='badge-unno'>UN {unno}</span> &nbsp; **{chem_name}** &nbsp; <span style='color:#64748B;'>(IMDG: {imdg} / 수량: {weight} {unit})</span>", unsafe_allow_html=True)
-                    with c_btn:
-                        button_key = f"btn_{port_code}_{ship}_{idx}_{unno}"
-                        if st.button("🤖 AI 가이드 생성", key=button_key, use_container_width=True):
-                            mapped_info = map_search_query_with_gemini(chem_name)
-                            st.session_state['active_chem'] = mapped_info.get("chem_ko", chem_name)
-                            st.session_state['active_unno'] = unno
-                            st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
-                            st.session_state['active_ship'] = f"[{port_name}] {ship}"
-                            st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
-                            st.session_state['active_summary'] = ""
-                            st.session_state['active_key_changed'] = True
-                            st.rerun()
-
-# ==========================================
-# 6. 메인 화면 구성 (Hero Section & 로고 정렬)
+# 4. 메인 화면 구성 (Hero Section & 로고 정렬)
 # ==========================================
 if kcg_logo_b64:
     st.markdown(f"""
@@ -744,19 +570,19 @@ if kcg_logo_b64:
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
             <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
         </div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">포트미스(PORT-MIS) + 공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
 # ------------------------------------------
-# 🔥 [고도화] HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
+# 🔥 HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
 # ------------------------------------------
 st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 입력)")
 search_input = st.text_input(
@@ -890,16 +716,3 @@ if 'active_chem' in st.session_state:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
-
-st.divider()
-
-# ------------------------------------------
-# ⚓ 항구별 위험물 반입 현황 탭 (평택항 / 대산항)
-# ------------------------------------------
-tab_pyeongtaek, tab_daesan = st.tabs(["⚓ 평택항 현황 및 대응 (청코드: 031)", "⚓ 대산항 현황 및 대응 (청코드: 300)"])
-
-with tab_pyeongtaek:
-    render_port_dashboard("평택항", "031")
-
-with tab_daesan:
-    render_port_dashboard("대산항", "300")
