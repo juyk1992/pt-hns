@@ -407,33 +407,62 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     base_url = "https://msds.kosha.or.kr/openapi/service/msdschem"
     chem_id = None
 
+    # 💡 우선순위: 1순위 UNNO, 2순위 CAS NO, 3순위 화학물질명
     search_trials = [
-        (chem_name, "0"),
+        (unno, "2"),
         (cas_no, "1"),
-        (unno, "2")
+        (chem_name, "0")
     ]
 
     for search_wrd, search_cnd in search_trials:
-        if not search_wrd or search_wrd in ["-", "0000", "없음"]:
+        if not search_wrd or str(search_wrd).strip() in ["-", "0000", "0", "없음", ""]:
             continue
         
+        clean_wrd = str(search_wrd).strip()
         list_url = f"{base_url}/getChemList"
         params = {
             'serviceKey': PUBLIC_API_KEY,
-            'searchWrd': search_wrd.strip(),
+            'searchWrd': clean_wrd,
             'searchCnd': search_cnd,
-            'numOfRows': '1',
+            'numOfRows': '5',  # 정확한 일치를 확인하기 위해 여러 개를 받아와 검증
             'pageNo': '1'
         }
         try:
             res = requests.get(list_url, params=params, timeout=5)
             root = ET.fromstring(res.content)
-            item = root.find('.//item')
-            if item is not None:
+            items = root.findall('.//item')
+            
+            matched_id = None
+            for item in items:
                 found_id = item.findtext('chemId') or item.findtext('chemId'.lower())
-                if found_id:
-                    chem_id = found_id.strip()
-                    break
+                if not found_id:
+                    continue
+                
+                # 💡 검색 조건별 정확성 검증 (유사 물질 오매칭 방지)
+                if search_cnd == "2":  # UNNO 검색인 경우
+                    item_unno = (item.findtext('unno') or '').strip()
+                    if item_unno == clean_wrd.zfill(4):
+                        matched_id = found_id.strip()
+                        break
+                elif search_cnd == "1":  # CAS NO 검색인 경우
+                    item_cas = (item.findtext('casNo') or '').strip()
+                    if item_cas == clean_wrd:
+                        matched_id = found_id.strip()
+                        break
+                elif search_cnd == "0":  # 화학물질명 검색인 경우 (국문명 또는 영문명이 정확히 일치하는지 확인)
+                    item_ko = (item.findtext('chemKo') or '').strip().replace("·", "")
+                    item_en = (item.findtext('chemEn') or '').strip().replace("·", "").lower()
+                    target_wrd = clean_wrd.replace("·", "").lower()
+                    
+                    if target_wrd == item_ko.lower() or target_wrd == item_en:
+                        matched_id = found_id.strip()
+                        break
+            
+            # 정확히 일치하는 항목을 찾았으면 탐색 중단
+            if matched_id:
+                chem_id = matched_id
+                break
+                
         except Exception as e:
             print(f"KOSHA getChemList (cnd={search_cnd}) 에러: {e}")
 
