@@ -885,51 +885,29 @@ def map_search_query_with_gemini(query_text):
     return default_res
 
 
-def generate_gemini_vision_summary(
-    chem_name,
-    unno,
-    cas_no,
-    dgst_info,
-    safety_info,
-    kosha_msds_text,
-    rag_text,
-    hns_pil_image=None,
-    hns_page_no=None,
-    rag_images=[],
-    accident_context='',
-):
-  """[멀티모달 Gemini Vision 통합 생성] - HNS 정보집 스캔 이미지 1장 + RAG 대응가이드 스캔 이미지 N장 동시 전달"""
-  if not GEMINI_API_KEY:
-    return '⚠️ Gemini API 키가 설정되지 않았습니다.'
+def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_text, hns_pil_image=None, hns_page_no=None, rag_images=[], accident_context=""):
+    """
+    [끝판왕 멀티모달 Gemini Vision 통합 생성]
+    - HNS 정보집 스캔 이미지 1장 + RAG 대응가이드 스캔 이미지 N장 + X,Y,Z류 오염범주 및 다중 API 종합 분석
+    """
+    if not GEMINI_API_KEY:
+        return "⚠️ Gemini API 키가 설정되지 않았습니다."
 
-  try:
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
 
-    accident_info = (
-        f'\n🚨 [현장 사고 상황 조건]: {accident_context}\n'
-        if accident_context
-        else ''
-    )
+        accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
+        
+        hns_img_prompt = f"\n- [첨부 이미지 1]: 해경 HNS 정보집 {hns_page_no}쪽 원본 스캔 이미지입니다. 표, 세로 쓰기, NFPA 픽토그램 수치 등을 직접 판독하여 반영하세요.\n" if (hns_pil_image and hns_page_no) else ""
+        
+        rag_img_prompt = ""
+        if rag_images:
+            rag_pages_str = ", ".join([f"{img['page_no']}쪽" for img in rag_images])
+            rag_img_prompt = f"\n- [첨부 이미지 추가]: 해경 HNS 해양사고 대응 가이드 ({rag_pages_str}) 원본 스캔 이미지들입니다.\n"
 
-    hns_img_prompt = (
-        f'\n- [첨부 이미지 1]: 해경 HNS 정보집 {hns_page_no}쪽 스캔'
-        ' 이미지입니다. 표와 세로 쓰기, 픽토그램 수치(NFPA 등)를 이미지에서 직접'
-        ' 판독하여 반영하세요.\n'
-        if (hns_pil_image and hns_page_no)
-        else ''
-    )
-
-    rag_img_prompt = ''
-    if rag_images:
-      rag_pages_str = ', '.join([f"{img['page_no']}쪽" for img in rag_images])
-      rag_img_prompt = (
-          '\n- [첨부 이미지 추가]: 해경 HNS 대응가이드'
-          f' ({rag_pages_str}) 스캔 이미지들입니다.\n'
-      )
-
-    prompt_text = f"""
-        당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
-        첨부된 [HNS 정보집 스캔 이미지] 및 [HNS 해양사고 대응가이드 스캔 이미지들], 그리고 수집된 공공 API 데이터들을 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
+        prompt_text = f"""
+        당신은 해양경찰청 및 항만 HNS 비상대응 상황실의 최고 수석 관제관입니다.
+        첨부된 [HNS 정보집 원본 스캔 이미지]와 [해양사고 대응 가이드 원본 스캔 이미지들], 그리고 수집된 다중 데이터(공공 API, MSDS, RAG 텍스트)를 철저히 교차 분석하여, 현장 세력(OSC, 경비함정, 특수구조대 등)에 즉각 하달할 수 있는 가장 전문적이고 완벽한 **비상대응 지시서(끝판왕 가이드)**를 작성하세요.
 
         {accident_info}
         {hns_img_prompt}
@@ -939,65 +917,69 @@ def generate_gemini_vision_summary(
         - 물질명: {chem_name} (UN NO: {unno})
         - IMDG 명칭: {dgst_info.get('imdgNm')} ({dgst_info.get('imdgEngNm')})
         - IMDG 등급코드 / 종류명: {dgst_info.get('imdgGradCd', '-')} / {dgst_info.get('kndNm', '-')}
+        - 종류품목명: {dgst_info.get('kndPrdlstNm', '-')}
         - 비상조치코드(EmS): {dgst_info.get('emergManagtCd', '-')}
+        - 선박 적재방법: {dgst_info.get('ldadngMth', '-')}
         - 주의사항: {dgst_info.get('catinMatter', '-')}
 
         [화학물질안전원 안전관리정보 API 수집 데이터 (CAS NO: {cas_no})]
         - 일반 증상 및 표적장기: {safety_info.get('symptom', '-')}
         - 흡입/피부/안구/경구 영향: {safety_info.get('inhale', '-')}, {safety_info.get('skin', '-')}, {safety_info.get('eyeball', '-')}, {safety_info.get('oral', '-')}
+        - 기타 유의사항: {safety_info.get('etc', '-')}
 
         [안전보건공단 MSDS 1~16번 종합 수집 데이터]
         {kosha_msds_text}
 
+        [선박오염방지규칙 제3조 유해액체물질 분류 기준 및 해상 거동 원칙]
+        - X류 물질: 해양 배출 시 심각한 위해 초래, 해양 배출 전면 금지 및 긴급 방제 최우선
+        - Y류 물질: 해양 배출 시 위해 발생, 해양 배출 엄격 제한
+        - Z류 물질: 해양 배출 시 경미한 위해, 해양 배출 일부 제한
+        - 기타물질 / 잠정평가물질: 위해가 없거나 잠정 평가된 물질
+        (※ 첨부된 정보집 이미지상의 운송방법/유해액체물질 분류(X,Y,Z류) 및 해상 거동 특성을 식별하여 방제 조치에 반드시 반영하세요.)
+
         [상황실 지침 반영 엄격 작성 규칙]
         1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
         2. [수치 및 안전 기준]: 
-           - 이격거리 및 보호구 등 핵심 수치는 첨부된 HNS 대응가이드 및 정보집 원본 이미지상의 수치를 최우선 반영하세요.
+           - 초기이격거리, 대피거리, 보호구 등 핵심 수치는 첨부된 원본 이미지 및 가이드(RAG) 수치를 최우선 반영하세요.
            - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
-           - 물 반응성 물질 확인 시 직사주수 절대 금지를 명시하세요.
+           - 물 반응성 물질 확인 시 직사주수 절대 금지 및 분무(안개) 주수를 명시하세요.
         3. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우 해당 사고 유형별 비상조치 지침을 최우선 포함하세요.
 
         --- 출력 형식을 엄격히 준수하세요 (항목 간 반드시 엔터로 줄바꿈) ---
 
         ### 🚨 [초동대응 핵심요약]
 
-        * **사고물질 및 위험성 판단**: [IMDG 등급 및 핵심위험성(인화성/독성/수반응성 등) 전파 및 위험성 평가 지시]
+        * **사고물질 및 위험성 판단**: [IMDG 등급, 유해액체물질 분류(X/Y/Z류) 및 핵심위험성(인화성/독성/수반응성 등) 전파 및 위험성 평가 지시]
         * **통제 및 이격거리 지시**: [초기이격, 화재대피, 유출방호 M단위 수치 명시 및 해역/현장 통제 조치 지시]
         * **출동세력 보호구 지정**: [필수 레벨(Level A/B/C/D) 및 필수 장비(공기호흡기, 내화학복, 가스탐지기 등) 착용 지시]
         * **현장 초동 행동 수칙**: [풍상위치 확보, 사고유형 맞춤 행동, 직수금지/소화약제 및 사고선 비상조치 확인 지시]
 
         ---
-        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성
+        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (유해액체물질 X/Y/Z류 및 해상 거동 포함)
         ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령
         ### 3. ⛔ 절대 금지 행동 (금기 사항)
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
-    # 🖼️ 멀티모달 입력 구성 (텍스트 + HNS정보집 이미지 1장 + RAG 대응가이드 이미지 N장)
-    contents_input = [prompt_text]
-    if hns_pil_image:
-      contents_input.append(hns_pil_image)
+        # 멀티모달 입력 (텍스트 + 정보집 이미지 + RAG 가이드 이미지들)
+        contents_input = [prompt_text]
+        if hns_pil_image:
+            contents_input.append(hns_pil_image)
+            
+        for r_img in rag_images:
+            contents_input.append(r_img['pil_img'])
 
-    for r_img in rag_images:
-      contents_input.append(r_img['pil_img'])
+        for model_id in ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']:
+            try:
+                response = client.models.generate_content(model=model_id, contents=contents_input)
+                return response.text
+            except Exception as ex:
+                print(f"{model_id} Vision 처리 시도 실패: {ex}")
+                continue
 
-    for model_id in [
-        'gemini-3.6-flash',
-        'gemini-3.5-flash-lite',
-        'gemini-3.5-flash',
-    ]:
-      try:
-        response = client.models.generate_content(
-            model=model_id, contents=contents_input
-        )
-        return response.text
-      except Exception as ex:
-        print(f'{model_id} Vision 처리 시도 실패: {ex}')
-        continue
-
-    return '⚠️ Gemini API 호출에 실패했습니다.'
-  except Exception as e:
-    return f'Gemini API 클라이언트 생성 오류: {e}'
+        return "⚠️ Gemini API 호출에 실패했습니다."
+    except Exception as e:
+        return f"Gemini API 클라이언트 생성 오류: {e}"
 
 
 # ==========================================
