@@ -596,6 +596,117 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     return f"[KOSHA MSDS chemId: {chem_id}]\n" + "\n".join(msds_details[:30])
 
 # ==========================================
+# 2-1. 선박제원 및 화물반출입 API 연동 모듈
+# ==========================================
+
+def fetch_vessel_spec_api(clsgn, vssl_nm):
+    """
+    [해양수산부 선박제원정보 API (SicsVsslManp3)]
+    - 1차: 호출부호(clsgn) 조회 -> 2차: 선박명(vsslNm) 교차 조회
+    """
+    if not PUBLIC_API_KEY:
+        return None
+
+    url = f"https://apis.data.go.kr/1192000/SicsVsslManp3/Info3?serviceKey={PUBLIC_API_KEY}"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+    # 1차: 호출부호 조회
+    trials = [('clsgn', str(clsgn).strip()), ('vsslNm', str(vssl_nm).strip())]
+    
+    for param_key, param_val in trials:
+        if not param_val or param_val == '-':
+            continue
+            
+        params = {param_key: param_val, 'numOfRows': '1', 'pageNo': '1'}
+        try:
+            session = requests.Session()
+            session.verify = False
+            res = session.get(url, params=params, headers=headers, timeout=8)
+            
+            if res.status_code == 200 and res.content:
+                root = ET.fromstring(res.content)
+                item = root.find('.//item')
+                if item is not None:
+                    return {
+                        "vsslNo": (item.findtext('vsslNo') or '-').strip(),
+                        "imoNo": (item.findtext('imoNo') or '-').strip(),
+                        "vsslKorNm": (item.findtext('vsslKorNm') or '-').strip(),
+                        "vsslEngNm": (item.findtext('vsslEngNm') or '-').strip(),
+                        "vsslKnd": (item.findtext('vsslKnd') or '-').strip(),
+                        "vsslNlty": (item.findtext('vsslNlty') or '-').strip(),
+                        "grtg": (item.findtext('grtg') or '-').strip(),
+                        "vsslTotLt": (item.findtext('vsslTotLt') or '-').strip(),
+                        "shdth": (item.findtext('shdth') or '-').strip(),
+                        "vsslDrft": (item.findtext('vsslDrft') or '-').strip(),
+                        "vsslDp": (item.findtext('vsslDp') or '-').strip(),
+                        "brbtSeNm": (item.findtext('brbtSeNm') or '-').strip(),
+                        "nvgShapNm": (item.findtext('nvgShapNm') or '-').strip(),
+                        "vsslCnstrDt": (item.findtext('vsslCnstrDt') or '-').strip().replace('T', ' ')
+                    }
+        except Exception as e:
+            print(f"선박제원 API 조회 에러 ({param_key}={param_val}): {e}")
+
+    return None
+
+
+def fetch_cargo_inout_api(port_code, etrypt_year, etrypt_co, clsgn, ibobprt_nm):
+    """
+    [해양수산부 외항/내항 화물반출입정보 API (CargFrghtOut4 / CargFrghtIn2)]
+    - 내외항구분 우선 순위 교차 스위칭 조회
+    """
+    if not PUBLIC_API_KEY:
+        return [], "미조회"
+
+    # API 엔드포인트 세팅 (외항: CargFrghtOut4, 내항: CargFrghtIn2)
+    url_out = f"https://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
+    url_in = f"https://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}"
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    
+    params = {
+        'prtAgCd': str(port_code).strip(),
+        'etryptYear': str(etrypt_year).strip(),
+        'etryptCo': str(etrypt_co).strip().zfill(3),
+        'clsgn': str(clsgn).strip(),
+        'numOfRows': '50',
+        'pageNo': '1'
+    }
+
+    # 내외항 우선순위 정하기 (기본값: 외항 우선)
+    is_inland_first = "내항" in str(ibobprt_nm)
+    search_order = [(url_in, "내항화물") if is_inland_first else (url_out, "외항화물"),
+                    (url_out, "외항화물") if is_inland_first else (url_in, "내항화물")]
+
+    for target_url, cargo_type in search_order:
+        try:
+            session = requests.Session()
+            session.verify = False
+            res = session.get(target_url, params=params, headers=headers, timeout=8)
+
+            if res.status_code == 200 and res.content:
+                root = ET.fromstring(res.content)
+                items = root.findall('.//item') or root.findall('body/items/item')
+
+                if items:
+                    cargo_list = []
+                    for item in items:
+                        cargo_list.append({
+                            "cargo_type": cargo_type,
+                            "tkinTkoutNm": (item.findtext('tkinTkoutNm') or '-').strip(),
+                            "frghtPrdlstKorNm": (item.findtext('frghtPrdlstKorNm') or item.findtext('frghtPrdlstNm') or '-').strip(),
+                            "frghtClNm": (item.findtext('frghtClNm') or '-').strip(),
+                            "wtTon": (item.findtext('wtTon') or '-').strip(),
+                            "packngKndNm": (item.findtext('packngKndNm') or '-').strip(),
+                            "lnlMthNm": (item.findtext('lnlMthNm') or '-').strip(),
+                            "satmntDt": (item.findtext('satmntDt') or '-').strip().replace('T', ' ')
+                        })
+                    return cargo_list, cargo_type
+        except Exception as e:
+            print(f"{cargo_type} 반출입 API 조회 에러: {e}")
+
+    return [], "정보없음"
+
+# ==========================================
 # 3. Gemini 자연어 매핑 및 AI 요약
 # ==========================================
 @st.cache_data(ttl=3600)
@@ -729,14 +840,59 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. 항만별 선박 모니터링 UI 렌더링 함수
+# 4. 모달 팝업 및 UI 렌더링 함수
 # ==========================================
 
+@st.dialog("🚢 선박 제원 및 화물 반출입 상세정보", width="large")
+def show_vessel_detail_dialog(v, port_code):
+    """선박 제원 API & 화물 반출입 API 통합 모달 다이얼로그"""
+    st.subheader(f"⚓ {v['vssl_nm']} (`{v['clsgn']}`)")
+    
+    with st.spinner("해양수산부 API로부터 선박제원 및 화물반출입 정보를 수집 중..."):
+        spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+        cargo_list, cargo_type = fetch_cargo_inout_api(
+            port_code, v['etrypt_year'], v['etrypt_co'], v['clsgn'], v.get('ibobprt_nm', '')
+        )
+
+    # 1. 선박 제원정보 표시
+    st.markdown("#### 📐 선박 제원 정보")
+    if spec_info:
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.write(f"- **선박번호:** {spec_info['vsslNo']}")
+            st.write(f"- **IMO번호:** {spec_info['imoNo']}")
+            st.write(f"- **선박한글명:** {spec_info['vsslKorNm']}")
+            st.write(f"- **선박영문명:** {spec_info['vsslEngNm']}")
+            st.write(f"- **선박종류:** {spec_info['vsslKnd']}")
+        with c2:
+            st.write(f"- **선박국적:** {spec_info['vsslNlty']}")
+            st.write(f"- **총톤수:** {spec_info['grtg']} 톤")
+            st.write(f"- **선박총길이:** {spec_info['vsslTotLt']} m")
+            st.write(f"- **선박너비:** {spec_info['shdth']} m")
+            st.write(f"- **선박흘수:** {spec_info['vsslDrft']} m")
+        with c3:
+            st.write(f"- **선박깊이:** {spec_info['vsslDp']} m")
+            st.write(f"- **나용선구분:** {spec_info['brbtSeNm']}")
+            st.write(f"- **운항형태:** {spec_info['nvgShapNm']}")
+            st.write(f"- **선박건조일시:** {spec_info['vsslCnstrDt']}")
+    else:
+        st.warning("💡 해당 선박의 제원 정보가 없거나 조회에 실패했습니다.")
+
+    st.divider()
+
+    # 2. 화물 반출입 정보 표시
+    st.markdown(f"#### 📦 화물 반출입 정보 (구분: `{cargo_type}`)")
+    if cargo_list:
+        df_cargo = pd.DataFrame(cargo_list)
+        df_cargo.columns = ["구분", "반출입명", "화물품목명", "화물분류", "중량톤", "포장종류", "하역방법", "신고일시"]
+        st.dataframe(df_cargo, use_container_width=True, hide_index=True)
+    else:
+        st.info("💡 해당 선박의 화물 반출입 신고 내역이 없습니다.")
+
 def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
-    """선박 1척에 대한 전체 25개 파라미터 상세 카드 UI (기본 닫힘 세팅)"""
+    """선박 1척에 대한 전체 25개 파라미터 상세 카드 UI"""
     expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
     
-    # 💡 expanded=False 로 기본적으로 닫혀있고 클릭 시 펼쳐지도록 설정
     with st.expander(expander_label, expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -773,89 +929,9 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
             st.write(f"- **적하화물톤:** {v['ld_frght_ton']} 톤")
 
         st.markdown("---")
-        if st.button(f"🤖 [{v['vssl_nm']}] 선종 기준 AI 대응가이드 생성", key=f"btn_vssl_{port_code}_{de_gb}_{idx}", use_container_width=True):
-            mapped_info = map_search_query_with_gemini(v['vssl_knd_nm'])
-            st.session_state['active_chem'] = mapped_info.get("chem_ko", v['vssl_knd_nm'])
-            st.session_state['active_unno'] = mapped_info.get("unno", "0000")
-            st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
-            st.session_state['active_ship'] = f"[{port_name} {v['etrynd_nm']}] {v['vssl_nm']} ({v['vssl_knd_nm']})"
-            st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
-            st.session_state['active_summary'] = ""
-            st.session_state['active_key_changed'] = True
-            st.rerun()
-
-
-def render_vessel_tab_content(port_name, port_code, de_gb):
-    gb_title = "입항" if de_gb == 'I' else "출항"
-    now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    today_date = now_kst.date()
-
-    # 💡 1. 검색 기간 기본값: 오늘 ~ 오늘
-    c_date1, c_date2, c_btn = st.columns([0.35, 0.35, 0.3])
-    with c_date1:
-        start_date = st.date_input("조회 시작일", value=today_date, key=f"sdate_{port_code}_{de_gb}")
-    with c_date2:
-        end_date = st.date_input("조회 종료일", value=today_date, key=f"edate_{port_code}_{de_gb}")
-    with c_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        # 💡 "조회" 버튼을 클릭해야만 수신 수행
-        query_trigger = st.button("🔍 조회", key=f"search_btn_{port_code}_{de_gb}", use_container_width=True)
-
-    # 수신 트리거 상태 제어
-    state_key_fetched = f"fetched_{port_code}_{de_gb}"
-    state_key_vessels = f"vessels_{port_code}_{de_gb}"
-
-    if query_trigger:
-        st.cache_data.clear()
-        st.session_state[state_key_fetched] = True
-
-    # 최초 접속 시 자동 조회가 안 되도록 처리
-    if not st.session_state.get(state_key_fetched, False):
-        st.info(f"💡 날짜 설정 후 우측의 **[🔍 조회]** 버튼을 클릭하면 {port_name} {gb_title} 신고 선박 정보가 실시간 연동됩니다.")
-        return
-
-    sde_str = start_date.strftime("%Y%m%d")
-    ede_str = end_date.strftime("%Y%m%d")
-    sde_fmt = start_date.strftime("%Y-%m-%d")
-    ede_fmt = end_date.strftime("%Y-%m-%d")
-
-    st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
-
-    with st.spinner(f"{port_name} {gb_title} 전체 선박 정보 수집 중..."):
-        vessels = fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str)
-
-    if not vessels:
-        st.warning(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없습니다.")
-        return
-
-    st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다.")
-
-    # 💡 2. 단일 셀렉트박스 (전체보기 + 개별선박 선택 목록)
-    ALL_VIEW_OPTION = f"📋 전체선박 목록 보기 (총 {len(vessels)}척)"
-    select_options = [ALL_VIEW_OPTION] + [
-        f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}" 
-        for v in vessels
-    ]
-
-    selected_option = st.selectbox(
-        "선박 필터링 선택 (개별 선박 선택 시 해당 선박만 표시됩니다):",
-        options=select_options,
-        key=f"filter_select_{port_code}_{de_gb}"
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # 💡 3. 필터링 조건에 따른 목록 리스트 표출
-    if selected_option == ALL_VIEW_OPTION:
-        # 전체 목록 보기
-        for idx, v in enumerate(vessels):
-            render_vessel_item_card(v, port_name, port_code, de_gb, f"all_{idx}")
-    else:
-        # 선택된 단일 선박만 보기
-        selected_idx = select_options.index(selected_option) - 1
-        if 0 <= selected_idx < len(vessels):
-            selected_vessel = vessels[selected_idx]
-            render_vessel_item_card(selected_vessel, port_name, port_code, de_gb, f"single_{selected_idx}")
+        # 💡 [요구사항] 버튼 명칭 변경 및 선박제원/화물 정보 팝업 띄우기
+        if st.button(f"🔍 [{v['vssl_nm']}] 선박제원 및 화물반출입정보 조회", key=f"btn_spec_{port_code}_{de_gb}_{idx}", use_container_width=True):
+            show_vessel_detail_dialog(v, port_code)
 
 # ==========================================
 # 5. 메인 화면 구성 (Hero Section & 로고 정렬)
