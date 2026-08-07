@@ -7,7 +7,6 @@ def extract_full_hns_text(pdf_path, output_json_path):
     hns_database = []
 
     with pdfplumber.open(pdf_path) as pdf:
-        # 본문 물질 페이지: 34페이지(인덱스 33) ~ 215페이지(인덱스 214)
         for page_num in range(39, 221):
             page = pdf.pages[page_num]
             text = page.extract_text()
