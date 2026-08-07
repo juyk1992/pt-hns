@@ -206,34 +206,35 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 # ==========================================
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
-  """PDF 전체 페이지를 스캔하여 UN번호, 물질명, 페이지 번호를 맵핑"""
-  if not os.path.exists(pdf_path):
-    return []
+    """PDF 전체 페이지를 스캔하여 UN번호, 물질명, 페이지 번호를 맵핑"""
+    if not os.path.exists(pdf_path):
+        return []
 
-  index_list = []
-  with pdfplumber.open(pdf_path) as pdf:
-    # 34페이지(인덱스 33)부터 215페이지(인덱스 214) 물질 영역 스캔
-    for idx in range(33, min(215, len(pdf.pages))):
-      page = pdf.pages[idx]
-      text = page.extract_text() or ''
-
-      unno_match = re.search(r'UN번호\s*(\d{4})', text)
-      unno = unno_match.group(1).strip() if unno_match else ''
-
-      lines = [l.strip() for line in text.split('\n') if l.strip()]
-      title = lines[0] if lines else ''
-
-      synonym_match = re.search(r'유사명\s*([^\n]+)', text)
-      synonyms = synonym_match.group(1).strip() if synonym_match else ''
-
-      index_list.append({
-          'page_index': idx,  # 0-based index
-          'page_no': idx + 1,  # 1-based page number
-          'unno': unno,
-          'title': title,
-          'synonyms': synonyms,
-      })
-  return index_list
+    index_list = []
+    with pdfplumber.open(pdf_path) as pdf:
+        # 34페이지(인덱스 33)부터 215페이지(인덱스 214) 물질 영역 스캔
+        for idx in range(33, min(215, len(pdf.pages))):
+            page = pdf.pages[idx]
+            text = page.extract_text() or ""
+            
+            unno_match = re.search(r'UN번호\s*(\d{4})', text)
+            unno = unno_match.group(1).strip() if unno_match else ""
+            
+            # 💡 [원인 수정]: 'l' 변수명 오타를 'line'으로 정상 수정
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            title = lines[0] if lines else ""
+            
+            synonym_match = re.search(r'유사명\s*([^\n]+)', text)
+            synonyms = synonym_match.group(1).strip() if synonym_match else ""
+            
+            index_list.append({
+                "page_index": idx,       # 0-based index
+                "page_no": idx + 1,       # 1-based page number
+                "unno": unno,
+                "title": title,
+                "synonyms": synonyms
+            })
+    return index_list
 
 
 hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
