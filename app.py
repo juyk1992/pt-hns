@@ -273,20 +273,18 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
 # ==========================================
 
-@st.cache_data(ttl=300)
+# 💡 캐시를 일시적으로 끄거나 ttl을 짧게 설정하여 이전 0건 캐시를 방지합니다.
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
-    [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - 테스트 코드와 동일한 URL 구성 방식 적용 (이중 인코딩 방지)
+    [해양수산부 선박운항정보 API (VsslEtrynd5)] 디버깅 메시지 포함
     """
     if not PUBLIC_API_KEY:
-        return []
+        return [], "PUBLIC_API_KEY 미설정"
 
     # KST 기준 오늘 날짜 구하기
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
     today_str = now_kst.strftime("%Y%m%d")
 
-    # 💡 [핵심 수정] URL 문자열에 serviceKey를 직접 삽입하여 params 인코딩 변형 방지
     url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
         'prtAgCd': port_code,
@@ -298,13 +296,24 @@ def fetch_vessel_schedule_api(port_code, de_gb):
     }
 
     vessels = []
+    debug_msg = ""
     try:
         session = requests.Session()
         session.verify = False
         res = session.get(url, params=params, timeout=10, verify=False)
 
+        debug_msg = f"URL: {res.url} | Status: {res.status_code}\n"
+        
         if res.status_code == 200 and res.content:
+            raw_xml = res.content.decode('utf-8', errors='ignore')
             root = ET.fromstring(res.content)
+            
+            result_code = root.findtext('.//resultCode', 'NONE')
+            result_msg = root.findtext('.//resultMsg', 'NONE')
+            total_cnt = root.findtext('.//totalCount', '0')
+            
+            debug_msg += f"ResultCode: {result_code} | ResultMsg: {result_msg} | TotalCount: {total_cnt}\n"
+            
             items = root.findall('.//item') or root.findall('body/items/item')
 
             for item in items:
@@ -317,7 +326,6 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                 etrypt_co = (item.findtext('etryptCo') or '-').strip()
                 smit_nm = (item.findtext('smitNm') or '-').strip()
 
-                # <detail> 상세 응답 구조 항목 추출
                 detail = item.find('.//detail') or item.find('details/detail')
                 facility_nm = detail.findtext('laidupFcltyNm', '-') if detail is not None else '-'
                 facility_cd = detail.findtext('laidupFcltyCd', '-') if detail is not None else '-'
@@ -349,10 +357,12 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                     "prent_prt": prent_prt,
                     "nxpt_prt": nxpt_prt
                 })
+        else:
+            debug_msg += f"HTTP 응답 에러: {res.status_code}"
     except Exception as e:
-        print(f"선박운항정보 API 수집 에러 ({port_code}/{de_gb}): {e}")
+        debug_msg += f"예외 발생: {e}"
 
-    return vessels
+    return vessels, debug_msg
 
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
@@ -642,6 +652,7 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # ==========================================
 # 4. 항만별 선박 모니터링 UI 렌더링 함수
 # ==========================================
+
 def render_vessel_tab_content(port_name, port_code, de_gb):
     gb_title = "입항" if de_gb == 'I' else "출항"
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
@@ -650,7 +661,11 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
     st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{today_fmt}` 기준)")
     
     with st.spinner(f"{port_name} {gb_title} 선박 정보 수집 중..."):
-        vessels = fetch_vessel_schedule_api(port_code, de_gb)
+        vessels, debug_msg = fetch_vessel_schedule_api(port_code, de_gb)
+
+    # 🔬 실시간 API 수신 디버깅 정보 (문제 해결 후 제거 가능)
+    with st.expander("🔬 [진단 로그] 실제 API 응답 상태 확인", expanded=not vessels):
+        st.code(debug_msg)
 
     if not vessels:
         st.info(f"💡 당일({today_fmt}) {port_name} {gb_title} 신고 선박 정보가 없거나 API 수집 대기 중입니다.")
