@@ -274,9 +274,12 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 Open API 연동 모듈 (SSL 에러 방어 적용)
 # ==========================================
 
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 @st.cache_data(ttl=600)
 def fetch_port_vessels_api(port_code):
-    """[선박운항정보 Open API (VsslEtrynd5)] 우회 헤더 적용 및 타임아웃 방어"""
+    """[선박운항정보 Open API (VsslEtrynd5)] 세션 재시도 및 타임아웃 대폭 완화"""
     if not PUBLIC_API_KEY:
         return []
     
@@ -308,8 +311,12 @@ def fetch_port_vessels_api(port_code):
         session = requests.Session()
         session.verify = False
         
-        # 선박운항정보 서버 응답 지연에 대비해 타임아웃을 15초로 상향
-        res = session.get(url, params=params, headers=headers, timeout=15, verify=False)
+        # 💡 재시도(Retry) 연결 정책 설정
+        retries = Retry(total=2, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+        session.mount('https://', HTTPAdapter(max_retries=retries))
+        
+        # 💡 Connect Timeout 10초, Read Timeout 10초로 대폭 확장
+        res = session.get(url, params=params, headers=headers, timeout=(10, 10), verify=False)
         
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
