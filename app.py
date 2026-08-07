@@ -279,27 +279,25 @@ import time
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - 포트미스 DB 쿼리 타임아웃 방지를 위해 날짜 범위를 최근 3일간으로 설정
-    - 연속 호출 시 동시성 제한 방지를 위한 세션 우회
+    - sde: 어제 날짜 (KST 기준)
+    - ede: 내일 날짜 (KST 기준)
+    - 언패킹 오류 방지를 위해 (vessels, debug_msg) 튜플 반환
     """
     if not PUBLIC_API_KEY:
-        return []
+        return [], "PUBLIC_API_KEY가 설정되지 않았습니다."
 
-    # KST 기준 날짜 설정 (당일 단하루 조회 시 포트미스 DB 타임아웃 방지를 위해 최근 3일 설정)
+    # KST 기준 날짜 계산 (sde: 어제, ede: 내일)
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    ede_str = now_kst.strftime("%Y%m%d")
-    sde_str = (now_kst - timedelta(days=2)).strftime("%Y%m%d")  # 3일간 범위
+    sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")  # 어제
+    ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")  # 내일
 
-    # URL과 params를 완전히 분리하여 requests가 올바르게 인코딩하도록 처리
-    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
-    
+    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
-        'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': str(port_code).strip(),
         'sde': sde_str,
         'ede': ede_str,
         'deGb': str(de_gb).strip().upper(),  # 'I' 또는 'O'
-        'numOfRows': '30',
+        'numOfRows': '50',
         'pageNo': '1'
     }
 
@@ -309,17 +307,24 @@ def fetch_vessel_schedule_api(port_code, de_gb):
     }
 
     vessels = []
+    debug_msg = ""
     try:
-        # API 서버 연속 호출 제한(Rate Limit) 방지를 위한 미세 대기
+        # 동시 다중 호출 시 포트미스 API 차단 방지를 위한 미세 대기
         time.sleep(0.3)
         
         session = requests.Session()
         session.verify = False
         
         res = session.get(url, params=params, headers=headers, timeout=12, verify=False)
+        debug_msg = f"HTTP Status: {res.status_code} | URL: {res.url}"
 
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
+            
+            result_code = root.findtext('.//resultCode', 'NONE')
+            total_cnt = root.findtext('.//totalCount', '0')
+            debug_msg += f" | Code: {result_code} | TotalCount: {total_cnt}"
+
             items = root.findall('.//item') or root.findall('body/items/item')
 
             for item in items:
@@ -364,9 +369,10 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                     "nxpt_prt": nxpt_prt
                 })
     except Exception as e:
+        debug_msg = f"API 수집 중 예외 발생: {e}"
         print(f"선박운항정보 API 수집 에러 ({port_code}/{de_gb}): {e}")
 
-    return vessels
+    return vessels, debug_msg
 
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
@@ -660,19 +666,16 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 def render_vessel_tab_content(port_name, port_code, de_gb):
     gb_title = "입항" if de_gb == 'I' else "출항"
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    today_fmt = now_kst.strftime("%Y년 %m월 %d일")
+    sde_fmt = (now_kst - timedelta(days=1)).strftime("%Y-%m-%d")
+    ede_fmt = (now_kst + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{today_fmt}` 기준)")
+    st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
     
     with st.spinner(f"{port_name} {gb_title} 선박 정보 수집 중..."):
         vessels, debug_msg = fetch_vessel_schedule_api(port_code, de_gb)
 
-    # 🔬 실시간 API 수신 디버깅 정보 (문제 해결 후 제거 가능)
-    with st.expander("🔬 [진단 로그] 실제 API 응답 상태 확인", expanded=not vessels):
-        st.code(debug_msg)
-
     if not vessels:
-        st.info(f"💡 당일({today_fmt}) {port_name} {gb_title} 신고 선박 정보가 없거나 API 수집 대기 중입니다.")
+        st.info(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없거나 API 수집 대기 중입니다.")
         return
 
     st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다. 선박 항목을 클릭하면 전체 상세 정보가 표출됩니다.")
