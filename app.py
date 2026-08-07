@@ -302,7 +302,7 @@ def fetch_vessel_schedule_api(port_code, de_gb):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=10)
+        res = session.get(url, params=params, timeout=10, verify=false)
 
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
