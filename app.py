@@ -273,7 +273,7 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (Open API 7종 종합 연동)
 # ==========================================
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def fetch_port_vessels_api(port_code):
     """[선박운항정보 Open API (VsslEtrynd5)] 항만별 실시간 입출항 선박 및 화물 매싱"""
     if not PUBLIC_API_KEY:
@@ -284,7 +284,7 @@ def fetch_port_vessels_api(port_code):
     ede = now.strftime("%Y%m%d")
     sde = (now - timedelta(days=2)).strftime("%Y%m%d")
     
-    url = f"http://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
+    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
         'prtAgCd': port_code,
         'sde': sde,
@@ -346,7 +346,7 @@ def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
         return res_data
         
     # 1. 외항화물반출입정보 (CargFrghtOut4)
-    url_out = f"http://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
+    url_out = f"https://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
     params = {
         'prtAgCd': port_code,
         'etryptYear': etrypt_year,
@@ -374,7 +374,7 @@ def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
         pass
 
     # 2. 내항화물반출입정보 (CargFrghtIn2)
-    url_in = f"http://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}"
+    url_in = f"https://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}"
     try:
         res = requests.get(url_in, params=params, timeout=4)
         root = ET.fromstring(res.content)
