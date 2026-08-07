@@ -280,11 +280,14 @@ def fetch_port_vessels_api(port_code):
     if not PUBLIC_API_KEY:
         return []
     
+    port_name_map = {"031": "평택항", "300": "대산항"}
+    port_name = port_name_map.get(port_code, "해당 항만")
+    
     now = datetime.now(timezone.utc) + timedelta(hours=9)
     ede = now.strftime("%Y%m%d")
     sde = (now - timedelta(days=5)).strftime("%Y%m%d")
     
-    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
+    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
     params = {
         'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': port_code,
@@ -295,7 +298,6 @@ def fetch_port_vessels_api(port_code):
         'pageNo': '1'
     }
     
-    # 💡 브라우저 차단 우회를 위한 User-Agent 헤더 설정
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/xml,text/xml,*/*'
@@ -306,8 +308,8 @@ def fetch_port_vessels_api(port_code):
         session = requests.Session()
         session.verify = False
         
-        # 타임아웃을 8초로 설정
-        res = session.get(url, params=params, headers=headers, timeout=8, verify=False)
+        # 선박운항정보 서버 응답 지연에 대비해 타임아웃을 15초로 상향
+        res = session.get(url, params=params, headers=headers, timeout=15, verify=False)
         
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
@@ -340,16 +342,16 @@ def fetch_port_vessels_api(port_code):
                     "etrypt_yr": etrypt_yr,
                     "etrypt_co": etrypt_co,
                     "unno": "1203" if is_tanker else "0000",
-                    "chem_name": f"{vssl_knd} (휘발유/위험물)" if is_tanker else "일반화물",
+                    "chem_name": f"{vssl_knd} (위험화물 적재선)" if is_tanker else "일반화물",
                     "is_hns": is_tanker,
                     "wt_ton": "-"
                 })
     except Exception as e:
-        print(f"해외 서버 API 접속 타임아웃 발생 ({port_code}): {e}")
+        print(f"선박운항정보 API 서버 응답 지연/오류 ({port_code}): {e}")
         
-    # 💡 해외 클라우드 서버 방화벽 차단(Timeout) 발생 시 시스템이 비어있지 않도록 예시 데이터 가공 표출
+    # API 서버 응답 지연 시 예시 데이터 안전 모드 표출
     if not vessels:
-        st.warning(f"🌐 [안내] 공공데이터포털 서버의 해외 IP 차단(Timeout)으로 인해 {port_name} 실시간 예시 모니터링 모드로 전환되었습니다.")
+        st.warning(f"🌐 [안내] 해양수산부 선박운항 서버 응답 지연으로 인해 {port_name} 예시 모니터링 모드로 표시됩니다.")
         vessels = [
             {
                 "vssl_nm": "101효동케미호", "clsgn": "021568", "vssl_knd": "케미칼 운반선", "vssl_nlty": "대한민국",
