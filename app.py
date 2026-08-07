@@ -1364,8 +1364,7 @@ if 'active_chem' in st.session_state:
         st.markdown('**[해양수산부 위험물정보 API]**')
         d = src.get('dgst', {})
         st.write(
-            f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm',"
-            " '-')})"
+            f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm',"" '-')})"
         )
         st.write(
             f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} /"
