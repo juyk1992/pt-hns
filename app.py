@@ -270,8 +270,129 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
+# 2. 공공 API 연동 모듈 (Open API 9종 종합 연동)
 # ==========================================
+
+@st.cache_data(ttl=600)
+def fetch_port_vessels_api(port_code):
+    """[해양수산부 선박운항정보 Open API (VsslEtrynd5)] 실시간 입출항 선박 및 화물 매싱"""
+    if not PUBLIC_API_KEY:
+        return []
+    
+    # KST 기준 최근 2일~오늘 조회
+    kst_now = datetime.utcnow() + timedelta(hours=9)
+    ede = kst_now.strftime("%Y%m%d")
+    sde = (kst_now - timedelta(days=2)).strftime("%Y%m%d")
+    
+    url = f"http://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
+    params = {
+        'prtAgCd': port_code,
+        'sde': sde,
+        'ede': ede,
+        'deGb': 'I',
+        'numOfRows': '50',
+        'pageNo': '1'
+    }
+    
+    vessels = []
+    try:
+        session = requests.Session()
+        session.verify = False
+        res = session.get(url, params=params, timeout=8)
+        root = ET.fromstring(res.content)
+        
+        for item in root.findall('.//item'):
+            clsgn = item.findtext('clsgn', '').strip()
+            vssl_nm = item.findtext('vsslNm', '').strip()
+            vssl_knd = item.findtext('vsslKndNm', '-').strip()
+            vssl_nlty = item.findtext('vsslNltyNm', '-').strip()
+            etrypt_yr = item.findtext('etryptYear', '').strip()
+            etrypt_co = item.findtext('etryptCo', '').strip()
+            
+            # 상세 정보(계선시설, 입출항시각 등)
+            detail = item.find('.//detail')
+            facility = detail.findtext('laidupFcltyNm', '선석 미지정') if detail is not None else '선석 미지정'
+            etrypt_dt = detail.findtext('etryptDt', '') if detail is not None else ''
+            
+            if not clsgn or not vssl_nm:
+                continue
+                
+            # 화물 및 UN NO 매싱 (외항/내항 화물 API 연동)
+            cargo_info = fetch_vessel_cargo_api(port_code, etrypt_yr, etrypt_co, clsgn)
+            
+            vessels.append({
+                "vssl_nm": vssl_nm,
+                "clsgn": clsgn,
+                "vssl_knd": vssl_knd,
+                "vssl_nlty": vssl_nlty,
+                "facility": facility,
+                "etrypt_dt": etrypt_dt[:16].replace('T', ' ') if etrypt_dt else '-',
+                "etrypt_yr": etrypt_yr,
+                "etrypt_co": etrypt_co,
+                "unno": cargo_info.get("unno", "0000"),
+                "chem_name": cargo_info.get("chem_name", "일반화물/미신고"),
+                "is_hns": cargo_info.get("is_hns", False),
+                "wt_ton": cargo_info.get("wt_ton", "-")
+            })
+    except Exception as e:
+        print(f"선박운항정보 API 에러 ({port_code}): {e}")
+        
+    return vessels
+
+def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
+    """[외항/내항 화물반출입 API] 선박별 UN NO 및 위험물 적재 여부 교차 검증"""
+    res_data = {"unno": "0000", "chem_name": "일반화물/기타", "is_hns": False, "wt_ton": "-"}
+    if not PUBLIC_API_KEY or not clsgn:
+        return res_data
+        
+    # 1. 외항화물반출입정보 (CargFrghtOut4) 조회
+    url_out = f"http://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
+    params = {
+        'prtAgCd': port_code,
+        'etryptYear': etrypt_year,
+        'etryptCo': etrypt_co,
+        'clsgn': clsgn,
+        'numOfRows': '5',
+        'pageNo': '1'
+    }
+    try:
+        res = requests.get(url_out, params=params, timeout=5)
+        root = ET.fromstring(res.content)
+        item = root.find('.//item')
+        if item is not None:
+            unno = item.findtext('unno', '').strip()
+            prdlst_nm = item.findtext('frghtPrdlstKorNm', '').strip()
+            wt_ton = item.findtext('wtTon', '-').strip()
+            
+            if unno and unno not in ["0000", "", "-"]:
+                res_data["unno"] = unno.zfill(4)
+                res_data["chem_name"] = prdlst_nm or "HNS 위험물"
+                res_data["is_hns"] = True
+                res_data["wt_ton"] = wt_ton
+                return res_data
+    except Exception:
+        pass
+
+    # 2. 내항화물반출입정보 (CargFrghtIn2) 조회 (외항 미발견 시)
+    url_in = f"http://apis.data.go.kr/1192000/CargFrghtIn2/Info2?serviceKey={PUBLIC_API_KEY}"
+    try:
+        res = requests.get(url_in, params=params, timeout=5)
+        root = ET.fromstring(res.content)
+        item = root.find('.//item')
+        if item is not None:
+            dgst_yn = item.findtext('dgstLdadngYn', '2').strip()  # 1: 위험물, 2: 일반
+            prdlst_nm = item.findtext('frghtPrdlstKorNm', '').strip()
+            wt_ton = item.findtext('wtTon', '-').strip()
+            
+            if dgst_yn == "1":
+                res_data["is_hns"] = True
+                res_data["chem_name"] = prdlst_nm or "내항 위험물"
+                res_data["wt_ton"] = wt_ton
+    except Exception:
+        pass
+
+    return res_data
+
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
     if not unno or unno in ["0000", "-", ""]:
@@ -343,7 +464,6 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     base_url = "https://msds.kosha.or.kr/openapi/service/msdschem"
     chem_id = None
 
-    # 💡 우선순위: 1순위 UNNO, 2순위 CAS NO, 3순위 화학물질명
     search_trials = [
         (unno, "2"),
         (cas_no, "1"),
@@ -360,7 +480,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
             'serviceKey': PUBLIC_API_KEY,
             'searchWrd': clean_wrd,
             'searchCnd': search_cnd,
-            'numOfRows': '5',  # 정확한 일치를 확인하기 위해 여러 개를 받아와 검증
+            'numOfRows': '5',
             'pageNo': '1'
         }
         try:
@@ -374,18 +494,17 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
                 if not found_id:
                     continue
                 
-                # 💡 검색 조건별 정확성 검증 (유사 물질 오매칭 방지)
-                if search_cnd == "2":  # UNNO 검색인 경우
+                if search_cnd == "2":
                     item_unno = (item.findtext('unno') or '').strip()
                     if item_unno == clean_wrd.zfill(4):
                         matched_id = found_id.strip()
                         break
-                elif search_cnd == "1":  # CAS NO 검색인 경우
+                elif search_cnd == "1":
                     item_cas = (item.findtext('casNo') or '').strip()
                     if item_cas == clean_wrd:
                         matched_id = found_id.strip()
                         break
-                elif search_cnd == "0":  # 화학물질명 검색인 경우 (국문명 또는 영문명이 정확히 일치하는지 확인)
+                elif search_cnd == "0":
                     item_ko = (item.findtext('chemKo') or '').strip().replace("·", "")
                     item_en = (item.findtext('chemEn') or '').strip().replace("·", "").lower()
                     target_wrd = clean_wrd.replace("·", "").lower()
@@ -394,7 +513,6 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
                         matched_id = found_id.strip()
                         break
             
-            # 정확히 일치하는 항목을 찾았으면 탐색 중단
             if matched_id:
                 chem_id = matched_id
                 break
@@ -561,7 +679,58 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. 메인 화면 구성 (Hero Section & 로고 정렬)
+# 4. 항구별 Open API 대시보드 렌더링 함수
+# ==========================================
+def render_port_dashboard(port_name, port_code):
+    st.markdown(f"#### 📊 {port_name} 실시간 선박 및 위험화물 모니터링 (Open API)")
+    st.caption("해양수산부 선박운항정보 및 외/내항 화물반출입 Open API 데이터를 실시간 연동합니다.")
+    
+    with st.spinner(f"{port_name} 실시간 선박 및 화물 정보 연동 중..."):
+        vessels = fetch_port_vessels_api(port_code)
+        
+    if not vessels:
+        st.info(f"💡 현재 {port_name}에 입항 또는 접안 중인 선박 정보가 없거나 API 수집 대기 중입니다.")
+        return
+        
+    df_vessels = pd.DataFrame(vessels)
+    hns_vessels = [v for v in vessels if v['is_hns']]
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="현재 입출항 선박 수", value=f"{len(vessels)} 척")
+    with col2:
+        st.metric(label="🚨 HNS(위험물) 적재 선박", value=f"{len(hns_vessels)} 척")
+        
+    tab1, tab2 = st.tabs(["🔥 위험물(HNS) 적재 선박", "🚢 전체 입출항 선박 현황"])
+    
+    with tab1:
+        if not hns_vessels:
+            st.success("✅ 현재 항내 위험물(HNS) 적재 신고 선박이 없습니다.")
+        else:
+            for idx, v in enumerate(hns_vessels):
+                with st.expander(f"🚨 [{v['vssl_nm']}] (호출부호: {v['clsgn']}) ｜ 선석: {v['facility']} ｜ 입항: {v['etrypt_dt']}"):
+                    st.markdown(f"**국적:** {v['vssl_nlty']} &nbsp;\|&nbsp; **선종:** {v['vssl_knd']} &nbsp;\|&nbsp; **화물중량:** {v['wt_ton']} 톤")
+                    st.markdown(f"• <span class='badge-unno'>UN {v['unno']}</span> &nbsp; **{v['chem_name']}**", unsafe_allow_html=True)
+                    
+                    if st.button("🤖 AI 가이드 생성", key=f"btn_hns_{port_code}_{idx}", use_container_width=True):
+                        mapped_info = map_search_query_with_gemini(v['chem_name'])
+                        st.session_state['active_chem'] = mapped_info.get("chem_ko", v['chem_name'])
+                        st.session_state['active_unno'] = v['unno'] if v['unno'] != "0000" else mapped_info.get("unno", "0000")
+                        st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
+                        st.session_state['active_ship'] = f"[{port_name}] {v['vssl_nm']}"
+                        st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
+                        st.session_state['active_summary'] = ""
+                        st.session_state['active_key_changed'] = True
+                        st.rerun()
+
+    with tab2:
+        st.dataframe(
+            df_vessels[['vssl_nm', 'clsgn', 'vssl_knd', 'facility', 'etrypt_dt', 'chem_name', 'unno']],
+            use_container_width=True
+        )
+
+# ==========================================
+# 5. 메인 화면 구성 (Hero Section & 로고 정렬)
 # ==========================================
 if kcg_logo_b64:
     st.markdown(f"""
@@ -570,14 +739,14 @@ if kcg_logo_b64:
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
             <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
         </div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="sub-header">공공 Open API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 else:
     st.markdown("""
     <div class="hero-container">
         <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="sub-header">공공 Open API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -716,3 +885,16 @@ if 'active_chem' in st.session_state:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
+
+st.divider()
+
+# ------------------------------------------
+# ⚓ 항구별 실시간 모니터링 탭 (평택항 / 대산항)
+# ------------------------------------------
+tab_pyeongtaek, tab_daesan = st.tabs(["⚓ 평택항 실시간 현황 (청코드: 031)", "⚓ 대산항 실시간 현황 (청코드: 300)"])
+
+with tab_pyeongtaek:
+    render_port_dashboard("평택항", "031")
+
+with tab_daesan:
+    render_port_dashboard("대산항", "300")
