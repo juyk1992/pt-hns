@@ -273,19 +273,21 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (Open API 7종 종합 연동)
 # ==========================================
 
-@st.cache_data(ttl=60)
+# 기존 @st.cache_data(ttl=300) 구문을 주석 처리하거나 캐시를 제거하여 즉시 반영되도록 합니다.
 def fetch_port_vessels_api(port_code):
     """[선박운항정보 Open API (VsslEtrynd5)] 항만별 실시간 입출항 선박 및 화물 매싱"""
     if not PUBLIC_API_KEY:
         return []
     
-    # KST 기준 최근 2일~오늘 조회
+    # KST 기준 최근 3일~오늘 조회
     now = datetime.now(timezone.utc) + timedelta(hours=9)
     ede = now.strftime("%Y%m%d")
-    sde = (now - timedelta(days=2)).strftime("%Y%m%d")
+    sde = (now - timedelta(days=3)).strftime("%Y%m%d")
     
-    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
+    # http와 https 모두 대응 가능하도록 설정
+    url = f"http://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
     params = {
+        'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': port_code,
         'sde': sde,
         'ede': ede,
@@ -298,47 +300,53 @@ def fetch_port_vessels_api(port_code):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=8)
-        root = ET.fromstring(res.content)
+        res = session.get(url, params=params, timeout=10)
         
-        for item in root.findall('.//item'):
-            clsgn = item.findtext('clsgn', '').strip()
-            vssl_nm = item.findtext('vsslNm', '').strip()
-            vssl_knd = item.findtext('vsslKndNm', '-').strip()
-            vssl_nlty = item.findtext('vsslNltyNm', '-').strip()
-            etrypt_yr = item.findtext('etryptYear', '').strip()
-            etrypt_co = item.findtext('etryptCo', '').strip()
+        # XML 파싱 전 응답 상태 및 텍스트 검증
+        if res.status_code == 200 and res.content:
+            root = ET.fromstring(res.content)
             
-            # 상세 관제시설/입출항시각
-            detail = item.find('.//detail')
-            facility = detail.findtext('laidupFcltyNm', '선석 미지정') if detail is not None else '선석 미지정'
-            etrypt_dt = detail.findtext('etryptDt', '') if detail is not None else ''
+            # //item 및 item 태그 모두 유연하게 탐색
+            items = root.findall('.//item') or root.findall('body/items/item')
             
-            if not clsgn or not vssl_nm:
-                continue
+            for item in items:
+                clsgn = (item.findtext('clsgn') or '').strip()
+                vssl_nm = (item.findtext('vsslNm') or '').strip()
+                vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
+                vssl_nlty = (item.findtext('vsslNltyNm') or '-').strip()
+                etrypt_yr = (item.findtext('etryptYear') or '').strip()
+                etrypt_co = (item.findtext('etryptCo') or '').strip()
                 
-            # 화물 및 UN NO 교차 수집 (외항/내항 화물 API 연동)
-            cargo_info = fetch_vessel_cargo_api(port_code, etrypt_yr, etrypt_co, clsgn)
-            
-            vessels.append({
-                "vssl_nm": vssl_nm,
-                "clsgn": clsgn,
-                "vssl_knd": vssl_knd,
-                "vssl_nlty": vssl_nlty,
-                "facility": facility,
-                "etrypt_dt": etrypt_dt[:16].replace('T', ' ') if etrypt_dt else '-',
-                "etrypt_yr": etrypt_yr,
-                "etrypt_co": etrypt_co,
-                "unno": cargo_info.get("unno", "0000"),
-                "chem_name": cargo_info.get("chem_name", "일반화물/기타"),
-                "is_hns": cargo_info.get("is_hns", False),
-                "wt_ton": cargo_info.get("wt_ton", "-")
-            })
+                # 상세 관제시설/입출항시각
+                detail = item.find('.//detail') or item.find('details/detail')
+                facility = detail.findtext('laidupFcltyNm', '선석 미지정') if detail is not None else '선석 미지정'
+                etrypt_dt = detail.findtext('etryptDt', '') if detail is not None else ''
+                
+                if not clsgn or not vssl_nm:
+                    continue
+                    
+                # 화물 및 UN NO 교차 수집 (외항/내항 화물 API 연동)
+                cargo_info = fetch_vessel_cargo_api(port_code, etrypt_yr, etrypt_co, clsgn)
+                
+                vessels.append({
+                    "vssl_nm": vssl_nm,
+                    "clsgn": clsgn,
+                    "vssl_knd": vssl_knd,
+                    "vssl_nlty": vssl_nlty,
+                    "facility": facility,
+                    "etrypt_dt": etrypt_dt[:16].replace('T', ' ') if etrypt_dt else '-',
+                    "etrypt_yr": etrypt_yr,
+                    "etrypt_co": etrypt_co,
+                    "unno": cargo_info.get("unno", "0000"),
+                    "chem_name": cargo_info.get("chem_name", "일반화물/기타"),
+                    "is_hns": cargo_info.get("is_hns", False),
+                    "wt_ton": cargo_info.get("wt_ton", "-")
+                })
     except Exception as e:
-        print(f"선박운항정보 API 에러 ({port_code}): {e}")
+        st.error(f"선박운항정보 API 연동 중 오류 발생 ({port_code}): {e}")
         
     return vessels
-
+    
 def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
     """[외항/내항 화물반출입 API] 선박별 UN NO 및 위험물 적재 여부 교차 검증"""
     res_data = {"unno": "0000", "chem_name": "일반화물/기타", "is_hns": False, "wt_ton": "-"}
