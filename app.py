@@ -273,16 +273,16 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (Open API 7종 종합 연동)
 # ==========================================
 
-@st.cache_data(ttl=600)  # 5분간 캐싱하여 반복적인 API 호출로 인한 타임아웃 차단
+@st.cache_data(ttl=1800)  # 30분간 캐싱하여 여유 있게 안정적 모니터링 유지
 def fetch_port_vessels_api(port_code):
-    """[선박운항정보 Open API (VsslEtrynd5)] 항만별 실시간 입출항 선박 및 화물 매싱"""
+    """[선박운항정보 Open API (VsslEtrynd5)] 항만별 입출항 선박 기본 목록 최우선 수집"""
     if not PUBLIC_API_KEY:
         return []
     
-    # KST 기준 최근 3일~오늘 조회
+    # KST 기준 최근 5일~오늘 조회 (충분한 조회 기간 확보)
     now = datetime.now(timezone.utc) + timedelta(hours=9)
     ede = now.strftime("%Y%m%d")
-    sde = (now - timedelta(days=3)).strftime("%Y%m%d")
+    sde = (now - timedelta(days=5)).strftime("%Y%m%d")
     
     url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
     params = {
@@ -291,7 +291,7 @@ def fetch_port_vessels_api(port_code):
         'sde': sde,
         'ede': ede,
         'deGb': 'I',
-        'numOfRows': '20',  # 호출 건수를 20건으로 조정하여 부하 감소
+        'numOfRows': '30',
         'pageNo': '1'
     }
     
@@ -306,8 +306,7 @@ def fetch_port_vessels_api(port_code):
             root = ET.fromstring(res.content)
             items = root.findall('.//item') or root.findall('body/items/item')
             
-            # 부하 방지를 위해 상위 15개 선박만 화물 정보 매싱
-            for item in items[:15]:
+            for item in items:
                 clsgn = (item.findtext('clsgn') or '').strip()
                 vssl_nm = (item.findtext('vsslNm') or '').strip()
                 vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
@@ -321,9 +320,9 @@ def fetch_port_vessels_api(port_code):
                 
                 if not clsgn or not vssl_nm:
                     continue
-                    
-                # 화물 정보 연동
-                cargo_info = fetch_vessel_cargo_api(port_code, etrypt_yr, etrypt_co, clsgn)
+                
+                # 케미칼/탱커/가스선 등 선종 명칭으로 위험물 가능 선박 1차 식별
+                is_tanker = any(k in vssl_knd for k in ['케미칼', '탱커', '가스', '위험물', '유조선', 'LPG', 'LNG', 'BULK'])
                 
                 vessels.append({
                     "vssl_nm": vssl_nm,
@@ -334,13 +333,11 @@ def fetch_port_vessels_api(port_code):
                     "etrypt_dt": etrypt_dt[:16].replace('T', ' ') if etrypt_dt else '-',
                     "etrypt_yr": etrypt_yr,
                     "etrypt_co": etrypt_co,
-                    "unno": cargo_info.get("unno", "0000"),
-                    "chem_name": cargo_info.get("chem_name", "일반화물/기타"),
-                    "is_hns": cargo_info.get("is_hns", False),
-                    "wt_ton": cargo_info.get("wt_ton", "-")
+                    "unno": "확인필요" if is_tanker else "0000",
+                    "chem_name": f"{vssl_knd} (적재 화물 확인 가능)" if is_tanker else "일반화물",
+                    "is_hns": is_tanker,
+                    "wt_ton": "-"
                 })
-                
-                time.sleep(0.1)  # API 서버 호출 간격 조절 (부하 방지)
                 
     except Exception as e:
         print(f"선박운항정보 API 연동 에러 ({port_code}): {e}")
@@ -348,7 +345,7 @@ def fetch_port_vessels_api(port_code):
     return vessels
 
 def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
-    """[외항/내항 화물반출입 API] 선박별 UN NO 및 위험물 적재 여부 교차 검증"""
+    """[외항/내항 화물반출입 API] 필요 시 단일 선박별 위험물 품목 명시적 조회"""
     res_data = {"unno": "0000", "chem_name": "일반화물/기타", "is_hns": False, "wt_ton": "-"}
     if not PUBLIC_API_KEY or not clsgn:
         return res_data
@@ -364,7 +361,7 @@ def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
         'pageNo': '1'
     }
     try:
-        res = requests.get(url_out, params=params, timeout=3, verify=False)
+        res = requests.get(url_out, params=params, timeout=5, verify=False)
         if res.status_code == 200:
             root = ET.fromstring(res.content)
             item = root.find('.//item')
