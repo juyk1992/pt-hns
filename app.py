@@ -273,62 +273,67 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
 # ==========================================
 
-import time
 from urllib.parse import unquote
+import xml.etree.ElementTree as ET
+import requests
+from datetime import datetime, timezone, timedelta
+import streamlit as st
 
 @st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
-    [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - serviceKey 이중 인코딩 방지 처리 적용
-    - sde: 어제, ede: 내일 (KST)
+    [선박운항정보 API (VsslEtrynd5)] 명세서 완벽 준수 파서
+    - 필수 파라미터: prtAgCd, sde, ede (포맷: YYYYMMDD)
+    - 중첩 태그 구조: item -> details -> detail 파싱 보완
     """
     if not PUBLIC_API_KEY:
-        return [], "PUBLIC_API_KEY가 설정되지 않았습니다."
+        return [], "PUBLIC_API_KEY 미설정"
 
+    # 💡 1. 디코딩/인코딩 키 변환 안전 처리 (params에 넘기기 위해 unquote 수행)
+    clean_service_key = unquote(PUBLIC_API_KEY)
+
+    # 💡 2. KST 기준 날짜 생성 (명세서 규격: YYYYMMDD 8자리)
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
     sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")  # 어제
     ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")  # 내일
 
-    # 💡 [핵심] API 키가 디코딩 키/인코딩 키에 관계없이 일관되게 동작하도록 unquote 처리 후 URL 직접 결합
-    clean_key = unquote(PUBLIC_API_KEY)
+    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
     
-    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={clean_key}"
-    
-    # serviceKey는 URL에 직접 포함했으므로 params에서는 제외
+    # 💡 3. 명세서 필수(1)/옵션(0) 파라미터 정확 구성
     params = {
-        'prtAgCd': str(port_code).strip(),
-        'sde': sde_str,
-        'ede': ede_str,
-        'deGb': str(de_gb).strip().upper(),
-        'numOfRows': '100',  # 62건 이상 넉넉히 수신하도록 100건 설정
+        'serviceKey': clean_service_key,
+        'prtAgCd': str(port_code).strip().zfill(3),  # 항만청코드 3자리 (예: 031, 300)
+        'sde': sde_str,                              # 검색 시작일 (8자리)
+        'ede': ede_str,                              # 검색 종료일 (8자리)
+        'deGb': str(de_gb).strip().upper(),          # I: 입항일기준, O: 출항일기준
+        'numOfRows': '100',                          # 한 페이지 결과 수 (최대 100)
         'pageNo': '1'
     }
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept': 'application/xml, text/xml, */*'
     }
 
     vessels = []
     debug_msg = ""
+    
     try:
-        time.sleep(0.2)  # 연속 요청 제한 방지
-        
         session = requests.Session()
         session.verify = False
         
-        # requests.get 실행
-        res = session.get(url, params=params, headers=headers, timeout=12, verify=False)
+        res = session.get(url, params=params, headers=headers, timeout=12)
         debug_msg = f"HTTP Status: {res.status_code}"
 
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
             
             result_code = root.findtext('.//resultCode', 'NONE')
+            result_msg = root.findtext('.//resultMsg', 'NONE')
             total_cnt = root.findtext('.//totalCount', '0')
-            debug_msg += f" | Code: {result_code} | TotalCount: {total_cnt}"
+            debug_msg += f" | Code: {result_code} ({result_msg}) | TotalCount: {total_cnt}"
 
+            # 💡 4. <item> 목록 탐색
             items = root.findall('.//item') or root.findall('body/items/item')
 
             for item in items:
@@ -336,20 +341,20 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                 clsgn = (item.findtext('clsgn') or '-').strip()
                 vssl_nlty = (item.findtext('vsslNltyNm') or '-').strip()
                 vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
-                grgt = (item.findtext('grgt') or '-').strip()
-                etrypt_yr = (item.findtext('etryptYear') or '-').strip()
-                etrypt_co = (item.findtext('etryptCo') or '-').strip()
-                smit_nm = (item.findtext('smitNm') or '-').strip()
-
-                detail = item.find('.//detail') or item.find('details/detail')
-                facility_nm = detail.findtext('laidupFcltyNm', '-') if detail is not None else '-'
-                facility_cd = detail.findtext('laidupFcltyCd', '-') if detail is not None else '-'
-                facility_sub_cd = detail.findtext('laidupFcltySubCd', '-') if detail is not None else '-'
-                etrypt_dt = detail.findtext('etryptDt', '-') if detail is not None else '-'
-                tkoff_dt = detail.findtext('tkoffDt', '-') if detail is not None else '-'
-                aprv_dt = detail.findtext('aprvDt', '-') if detail is not None else '-'
-                prent_prt = detail.findtext('prentPrtCd', '-') if detail is not None else '-'
-                nxpt_prt = detail.findtext('nxptPrtCd', '-') if detail is not None else '-'
+                
+                # <details> 하위의 <detail> 계선/일시 정보 다중 추출 처리
+                detail_node = item.find('.//detail') or item.find('details/detail')
+                
+                facility_nm = '-'
+                etrypt_dt = '-'
+                tkoff_dt = '-'
+                smit_nm = '-'
+                
+                if detail_node is not None:
+                    facility_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
+                    etrypt_dt = (detail_node.findtext('etryptDt') or '-').strip()
+                    tkoff_dt = (detail_node.findtext('tkoffDt') or '-').strip()
+                    smit_nm = (detail_node.findtext('reqstSeNm') or '-').strip()
 
                 if vssl_nm == '-' and clsgn == '-':
                     continue
@@ -359,22 +364,21 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                     "clsgn": clsgn,
                     "vssl_nlty": vssl_nlty,
                     "vssl_knd": vssl_knd,
-                    "grgt": grgt,
-                    "etrypt_yr": etrypt_yr,
-                    "etrypt_co": etrypt_co,
-                    "smit_nm": smit_nm,
                     "facility_nm": facility_nm,
-                    "facility_cd": facility_cd,
-                    "facility_sub_cd": facility_sub_cd,
                     "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-',
                     "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',
-                    "aprv_dt": aprv_dt.replace('T', ' ') if aprv_dt != '-' else '-',
-                    "prent_prt": prent_prt,
-                    "nxpt_prt": nxpt_prt
+                    "smit_nm": smit_nm,
+                    "etrypt_yr": (item.findtext('etryptYear') or '-').strip(),
+                    "etrypt_co": (item.findtext('etryptCo') or '-').strip(),
+                    "grgt": "-",
+                    "facility_cd": "-",
+                    "facility_sub_cd": "-",
+                    "aprv_dt": "-",
+                    "prent_prt": "-",
+                    "nxpt_prt": "-"
                 })
     except Exception as e:
-        debug_msg = f"API 수집 중 예외 발생: {e}"
-        print(f"선박운항정보 API 수집 에러 ({port_code}/{de_gb}): {e}")
+        debug_msg = f"수집 에러: {e}"
 
     return vessels, debug_msg
 
