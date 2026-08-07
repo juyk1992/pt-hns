@@ -326,7 +326,7 @@ def load_kcg_vectorstore():
 kcg_vectorstore = load_kcg_vectorstore()
 
 
-def fetch_rag_context_and_images(query, k=5):
+def fetch_rag_context_and_images(query, k=10):
   """RAG 검색 결과 텍스트와 함께 해당 페이지의 고화질 이미지 리스트를 반환"""
   if not kcg_vectorstore or not query:
     return 'RAG 가이드 데이터베이스 미생성', []
