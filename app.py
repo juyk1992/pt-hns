@@ -6,7 +6,7 @@ import os
 import json
 import base64
 import urllib3
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from google import genai
 
 # RAG Vector DB 연동 라이브러리
@@ -270,19 +270,19 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (Open API 9종 종합 연동)
+# 2. 공공 API 연동 모듈 (Open API 7종 종합 연동)
 # ==========================================
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def fetch_port_vessels_api(port_code):
-    """[해양수산부 선박운항정보 Open API (VsslEtrynd5)] 실시간 입출항 선박 및 화물 매싱"""
+    """[선박운항정보 Open API (VsslEtrynd5)] 항만별 실시간 입출항 선박 및 화물 매싱"""
     if not PUBLIC_API_KEY:
         return []
     
     # KST 기준 최근 2일~오늘 조회
-    kst_now = datetime.utcnow() + timedelta(hours=9)
-    ede = kst_now.strftime("%Y%m%d")
-    sde = (kst_now - timedelta(days=2)).strftime("%Y%m%d")
+    now = datetime.now(timezone.utc) + timedelta(hours=9)
+    ede = now.strftime("%Y%m%d")
+    sde = (now - timedelta(days=2)).strftime("%Y%m%d")
     
     url = f"http://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
@@ -309,7 +309,7 @@ def fetch_port_vessels_api(port_code):
             etrypt_yr = item.findtext('etryptYear', '').strip()
             etrypt_co = item.findtext('etryptCo', '').strip()
             
-            # 상세 정보(계선시설, 입출항시각 등)
+            # 상세 관제시설/입출항시각
             detail = item.find('.//detail')
             facility = detail.findtext('laidupFcltyNm', '선석 미지정') if detail is not None else '선석 미지정'
             etrypt_dt = detail.findtext('etryptDt', '') if detail is not None else ''
@@ -317,7 +317,7 @@ def fetch_port_vessels_api(port_code):
             if not clsgn or not vssl_nm:
                 continue
                 
-            # 화물 및 UN NO 매싱 (외항/내항 화물 API 연동)
+            # 화물 및 UN NO 교차 수집 (외항/내항 화물 API 연동)
             cargo_info = fetch_vessel_cargo_api(port_code, etrypt_yr, etrypt_co, clsgn)
             
             vessels.append({
@@ -330,7 +330,7 @@ def fetch_port_vessels_api(port_code):
                 "etrypt_yr": etrypt_yr,
                 "etrypt_co": etrypt_co,
                 "unno": cargo_info.get("unno", "0000"),
-                "chem_name": cargo_info.get("chem_name", "일반화물/미신고"),
+                "chem_name": cargo_info.get("chem_name", "일반화물/기타"),
                 "is_hns": cargo_info.get("is_hns", False),
                 "wt_ton": cargo_info.get("wt_ton", "-")
             })
@@ -345,7 +345,7 @@ def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
     if not PUBLIC_API_KEY or not clsgn:
         return res_data
         
-    # 1. 외항화물반출입정보 (CargFrghtOut4) 조회
+    # 1. 외항화물반출입정보 (CargFrghtOut4)
     url_out = f"http://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
     params = {
         'prtAgCd': port_code,
@@ -356,7 +356,7 @@ def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
         'pageNo': '1'
     }
     try:
-        res = requests.get(url_out, params=params, timeout=5)
+        res = requests.get(url_out, params=params, timeout=4)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
@@ -373,10 +373,10 @@ def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
     except Exception:
         pass
 
-    # 2. 내항화물반출입정보 (CargFrghtIn2) 조회 (외항 미발견 시)
-    url_in = f"http://apis.data.go.kr/1192000/CargFrghtIn2/Info2?serviceKey={PUBLIC_API_KEY}"
+    # 2. 내항화물반출입정보 (CargFrghtIn2)
+    url_in = f"http://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}"
     try:
-        res = requests.get(url_in, params=params, timeout=5)
+        res = requests.get(url_in, params=params, timeout=4)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
