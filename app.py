@@ -959,23 +959,23 @@ def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_in
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
-    # 멀티모달 입력 구성
-    contents_input = [prompt_text]
-    if hns_pil_image:
-        contents_input.append(hns_pil_image)
+        # 멀티모달 입력 구성
+        contents_input = [prompt_text]
+        if hns_pil_image:
+            contents_input.append(hns_pil_image)
         
-    for r_img in rag_images:
-        contents_input.append(r_img['pil_img'])
+        for r_img in rag_images:
+            contents_input.append(r_img['pil_img'])
 
-    for model_id in ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']:
-        try:
-            response = client.models.generate_content(model=model_id, contents=contents_input)
-            return response.text
-        except Exception as ex:
-            print(f"{model_id} Vision 처리 시도 실패: {ex}")
-            continue
+        for model_id in ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']:
+            try:
+                response = client.models.generate_content(model=model_id, contents=contents_input)
+                return response.text
+            except Exception as ex:
+                print(f"{model_id} Vision 처리 시도 실패: {ex}")
+                continue
 
-    return "⚠️ Gemini API 호출에 실패했습니다."
+        return "⚠️ Gemini API 호출에 실패했습니다."
     except Exception as e:
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
