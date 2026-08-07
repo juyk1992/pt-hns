@@ -273,7 +273,6 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (Open API 7종 종합 연동)
 # ==========================================
 
-# 기존 @st.cache_data(ttl=300) 구문을 주석 처리하거나 캐시를 제거하여 즉시 반영되도록 합니다.
 def fetch_port_vessels_api(port_code):
     """[선박운항정보 Open API (VsslEtrynd5)] 항만별 실시간 입출항 선박 및 화물 매싱"""
     if not PUBLIC_API_KEY:
@@ -284,8 +283,8 @@ def fetch_port_vessels_api(port_code):
     ede = now.strftime("%Y%m%d")
     sde = (now - timedelta(days=3)).strftime("%Y%m%d")
     
-    # http와 https 모두 대응 가능하도록 설정
-    url = f"http://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
+    # 💡 http -> https 변경 및 연결 안정성 확보
+    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
     params = {
         'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': port_code,
@@ -300,13 +299,12 @@ def fetch_port_vessels_api(port_code):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=10)
         
-        # XML 파싱 전 응답 상태 및 텍스트 검증
+        # 💡 Connect Timeout 5초, Read Timeout 10초 설정
+        res = session.get(url, params=params, timeout=(5, 10))
+        
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
-            
-            # //item 및 item 태그 모두 유연하게 탐색
             items = root.findall('.//item') or root.findall('body/items/item')
             
             for item in items:
@@ -317,7 +315,6 @@ def fetch_port_vessels_api(port_code):
                 etrypt_yr = (item.findtext('etryptYear') or '').strip()
                 etrypt_co = (item.findtext('etryptCo') or '').strip()
                 
-                # 상세 관제시설/입출항시각
                 detail = item.find('.//detail') or item.find('details/detail')
                 facility = detail.findtext('laidupFcltyNm', '선석 미지정') if detail is not None else '선석 미지정'
                 etrypt_dt = detail.findtext('etryptDt', '') if detail is not None else ''
@@ -325,7 +322,7 @@ def fetch_port_vessels_api(port_code):
                 if not clsgn or not vssl_nm:
                     continue
                     
-                # 화물 및 UN NO 교차 수집 (외항/내항 화물 API 연동)
+                # 화물 및 UN NO 교차 수집 (타임아웃 방지 개별 예외 처리)
                 cargo_info = fetch_vessel_cargo_api(port_code, etrypt_yr, etrypt_co, clsgn)
                 
                 vessels.append({
@@ -342,60 +339,65 @@ def fetch_port_vessels_api(port_code):
                     "is_hns": cargo_info.get("is_hns", False),
                     "wt_ton": cargo_info.get("wt_ton", "-")
                 })
+    except requests.exceptions.Timeout:
+        st.warning(f"⚠️ 공공데이터포털 서버 응답 지연으로 선박 정보 수집이 일시 중단되었습니다 ({port_code}). 잠시 후 다시 시도해 주세요.")
     except Exception as e:
-        st.error(f"선박운항정보 API 연동 중 오류 발생 ({port_code}): {e}")
+        print(f"선박운항정보 API 연동 에러 ({port_code}): {e}")
         
     return vessels
-    
+
 def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
     """[외항/내항 화물반출입 API] 선박별 UN NO 및 위험물 적재 여부 교차 검증"""
     res_data = {"unno": "0000", "chem_name": "일반화물/기타", "is_hns": False, "wt_ton": "-"}
     if not PUBLIC_API_KEY or not clsgn:
         return res_data
         
-    # 1. 외항화물반출입정보 (CargFrghtOut4)
-    url_out = f"https://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
+    # 💡 https 적용 및 타임아웃 2초 단축 (반복문 병목 방지)
+    url_out = "https://apis.data.go.kr/1192000/CargFrghtOut4/Info4"
     params = {
+        'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': port_code,
         'etryptYear': etrypt_year,
         'etryptCo': etrypt_co,
         'clsgn': clsgn,
-        'numOfRows': '5',
+        'numOfRows': '3',
         'pageNo': '1'
     }
     try:
-        res = requests.get(url_out, params=params, timeout=4)
-        root = ET.fromstring(res.content)
-        item = root.find('.//item')
-        if item is not None:
-            unno = item.findtext('unno', '').strip()
-            prdlst_nm = item.findtext('frghtPrdlstKorNm', '').strip()
-            wt_ton = item.findtext('wtTon', '-').strip()
-            
-            if unno and unno not in ["0000", "", "-"]:
-                res_data["unno"] = unno.zfill(4)
-                res_data["chem_name"] = prdlst_nm or "HNS 위험물"
-                res_data["is_hns"] = True
-                res_data["wt_ton"] = wt_ton
-                return res_data
+        res = requests.get(url_out, params=params, timeout=2, verify=False)
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            item = root.find('.//item')
+            if item is not None:
+                unno = (item.findtext('unno') or '').strip()
+                prdlst_nm = (item.findtext('frghtPrdlstKorNm') or '').strip()
+                wt_ton = (item.findtext('wtTon') or '-').strip()
+                
+                if unno and unno not in ["0000", "", "-"]:
+                    res_data["unno"] = unno.zfill(4)
+                    res_data["chem_name"] = prdlst_nm or "HNS 위험물"
+                    res_data["is_hns"] = True
+                    res_data["wt_ton"] = wt_ton
+                    return res_data
     except Exception:
         pass
 
     # 2. 내항화물반출입정보 (CargFrghtIn2)
-    url_in = f"https://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}"
+    url_in = "https://apis.data.go.kr/1192000/CargFrghtIn2/Info"
     try:
-        res = requests.get(url_in, params=params, timeout=4)
-        root = ET.fromstring(res.content)
-        item = root.find('.//item')
-        if item is not None:
-            dgst_yn = item.findtext('dgstLdadngYn', '2').strip()  # 1: 위험물, 2: 일반
-            prdlst_nm = item.findtext('frghtPrdlstKorNm', '').strip()
-            wt_ton = item.findtext('wtTon', '-').strip()
-            
-            if dgst_yn == "1":
-                res_data["is_hns"] = True
-                res_data["chem_name"] = prdlst_nm or "내항 위험물"
-                res_data["wt_ton"] = wt_ton
+        res = requests.get(url_in, params=params, timeout=2, verify=False)
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            item = root.find('.//item')
+            if item is not None:
+                dgst_yn = (item.findtext('dgstLdadngYn') or '2').strip()
+                prdlst_nm = (item.findtext('frghtPrdlstKorNm') or '').strip()
+                wt_ton = (item.findtext('wtTon') or '-').strip()
+                
+                if dgst_yn == "1":
+                    res_data["is_hns"] = True
+                    res_data["chem_name"] = prdlst_nm or "내항 위험물"
+                    res_data["wt_ton"] = wt_ton
     except Exception:
         pass
 
