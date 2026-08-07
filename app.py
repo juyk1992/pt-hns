@@ -250,11 +250,11 @@ hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 def get_hns_page_image(unno_or_query, cas_no="-"):
     """
-    [본문 영역 내 4단계 순차 탐색 방식]
-    1차: UN번호 일치 검색
-    2차: CAS번호 일치 검색
+    [본문 영역 내 개편된 순차 탐색 방식]
+    1차: CAS번호 일치 검색 (고유 화학식 기준 우선)
+    2차: UN번호 일치 검색
     3차: 물질명 또는 유사명 포함 검색
-    4차: 페이지 전체 텍스트 내 포함 검색
+    4차: 페이지 전체 텍스트 내 포함 검색 (최후의 보루)
     """
     if not hns_pdf_index or not os.path.exists(HNS_PDF_PATH):
         return None, None
@@ -263,17 +263,17 @@ def get_hns_page_image(unno_or_query, cas_no="-"):
     q_cas = str(cas_no).strip()
     target_item = None
 
-    # 1차: UN번호로 본문 내에서 찾기
-    if q.isdigit() and len(q) == 4:
-        for item in hns_pdf_index:
-            if item['unno'] == q:
-                target_item = item
-                break
-
-    # 2차: CAS번호로 본문 내에서 찾기
+    # 1차: CAS번호로 본문 내에서 먼저 찾기 (우선순위 상향)
     if not target_item and q_cas and q_cas not in ["-", "0000", "없음"]:
         for item in hns_pdf_index:
             if q_cas in item.get('raw_text', ''):
+                target_item = item
+                break
+
+    # 2차: UN번호로 본문 내에서 찾기
+    if not target_item and q.isdigit() and len(q) == 4:
+        for item in hns_pdf_index:
+            if item['unno'] == q:
                 target_item = item
                 break
 
