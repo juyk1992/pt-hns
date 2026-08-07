@@ -10,3 +10,5 @@ pysqlite3-binary
 pypdf
 torch
 torchvision
+pdf2image
+Pillow
