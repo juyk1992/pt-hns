@@ -897,7 +897,7 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
         with col2:
             st.markdown("**[운항 및 관제 일시]**")
             st.write(f"- **입출항구분명:** {v['etrynd_nm']} ({v['reqst_se_nm']})")
-            st.write(f"- **내외항구분명:** **{v['ibobprt_nm']}**")  # 💡 화면 표출 항목 추가
+            st.write(f"- **내외항구분명:** {v['ibobprt_nm']}")  # 💡 화면 표출 항목 추가
             st.write(f"- **입항목적명:** {v['etrypt_purps_nm']}")
             st.write(f"- **입항일시:** {v['etrypt_dt']}")
             st.write(f"- **출항일시:** {v['tkoff_dt']}")
