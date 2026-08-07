@@ -201,58 +201,43 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
 
 # ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 (실제 PDF 물리 오프셋 +6쪽 보정 반영)
+# 1. 🖼️ PDF 인덱스 맵 생성 (물리 페이지 40페이지~221페이지 전수 탐색)
 # ==========================================
 
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
     """
-    HNS 정보집 PDF 스캔 (인쇄 쪽수와 PDF 물리 페이지 간 +6쪽 차이 보정)
-    - 예: 인쇄 34쪽(과산화수소) = PDF 40번째 페이지 (index 39)
-    - 예: 인쇄 215쪽(황화수소) = PDF 221번째 페이지 (index 220)
+    HNS 정보집 PDF 물리적 인덱스 직접 매핑
+    - 물리적 40번째 페이지(index 39) ~ 221번째 페이지(index 220) 정확 순회
     """
     if not os.path.exists(pdf_path):
         return []
 
     index_list = []
     with pdfplumber.open(pdf_path) as pdf:
-        # 실제 본문 물질 페이지: PDF 물리 인덱스 39(40쪽) ~ 220(221쪽)
-        start_idx = 39
-        end_idx = min(221, len(pdf.pages))
-        
-        for idx in range(start_idx, end_idx):
+        # 물리 페이지 index 39 ~ 220 (실제 물리적 40페이지 ~ 221페이지)
+        for idx in range(39, min(221, len(pdf.pages))):
             page = pdf.pages[idx]
             text = page.extract_text() or ""
             
             if not text.strip():
                 continue
 
+            # UN번호 4자리 추출
             unno_match = re.search(r'UN번호\s*(\d{4})', text)
             unno = unno_match.group(1).strip() if unno_match else ""
             
+            # 페이지 첫 줄 물질명
             lines = [line.strip() for line in text.split('\n') if line.strip()]
             title = lines[0] if lines else ""
             
+            # 유사명 추출
             synonym_match = re.search(r'유사명\s*([^\n]+)', text)
             synonyms = synonym_match.group(1).strip() if synonym_match else ""
 
-            # 페이지 하단/우측의 실제 인쇄 쪽수 파싱 (없을 경우 오프셋 계산: 물리페이지 - 6)
-            printed_page_no = idx - 5  # 기본 보정값 (40쪽 = 인쇄 34쪽)
-            
-            # 페이지 내 인쇄된 숫자 추출 시도
-            page_num_match = re.search(r'(\d{2,3})\s*$', text)
-            if page_num_match:
-                try:
-                    p_val = int(page_num_match.group(1))
-                    if 34 <= p_val <= 215:
-                        printed_page_no = p_val
-                except ValueError:
-                    pass
-
             index_list.append({
-                "page_index": idx,           # PDF 내부 0-based 물리 인덱스 (예: 39)
-                "physical_page_no": idx + 1, # PDF 물리 페이지 번호 (예: 40)
-                "printed_page_no": printed_page_no, # 정보집 인쇄 쪽수 (예: 34)
+                "page_index": idx,            # 0-based 물리 인덱스 (예: 39)
+                "display_page_no": idx + 1,   # 1-based 물리 페이지 번호 (예: 40페이지)
                 "unno": unno,
                 "title": title,
                 "synonyms": synonyms
@@ -263,7 +248,7 @@ hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 
 def get_hns_page_image(unno_or_query):
-    """UN번호 또는 물질명으로 HNS 정보집 PDF 물리 페이지를 정확히 찾아 300DPI PIL 이미지로 렌더링"""
+    """UN번호 또는 물질명으로 해당 물리적 PDF 페이지(40~221)를 300DPI 이미지로 렌더링"""
     if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
         return None, None
 
@@ -284,10 +269,10 @@ def get_hns_page_image(unno_or_query):
 
     try:
         with pdfplumber.open(HNS_PDF_PATH) as pdf:
-            # 보정된 정확한 물리 인덱스로 페이지 자르기
+            # 지정된 물리적 인덱스 페이지 바로 렌더링
             page = pdf.pages[target_item['page_index']]
             pix = page.to_image(resolution=300)
-            return pix.original, target_item['printed_page_no']
+            return pix.original, target_item['display_page_no']
     except Exception as e:
         print(f"HNS 정보집 PDF 이미지 렌더링 에러: {e}")
         return None, None
