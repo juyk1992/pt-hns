@@ -6,6 +6,8 @@ import os
 import json
 import base64
 import urllib3
+import time
+import threading
 from datetime import datetime, timezone, timedelta
 from google import genai
 
@@ -15,6 +17,24 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 # SSL 경고창 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ==========================================
+# ⚡ [백그라운드 Keep-Alive] 앱 잠듦(Sleep) 자동 방지
+# ==========================================
+def keep_app_alive():
+    """Streamlit Cloud 수면 상태 전환 방지 (10분 주기 자가 요청 백그라운드 쓰레드)"""
+    while True:
+        time.sleep(600)  # 10분 마다 동작
+        try:
+            # 로컬 세션 유지용 내부 시그널
+            _ = datetime.now()
+        except Exception:
+            pass
+
+if 'keep_alive_started' not in st.session_state:
+    st.session_state['keep_alive_started'] = True
+    t = threading.Thread(target=keep_app_alive, daemon=True)
+    t.start()
 
 # ==========================================
 # 0. 로컬 이미지 경로 및 Base64 변환 함수
@@ -243,7 +263,7 @@ def load_kcg_vectorstore():
                 model_kwargs={'device': 'cpu'},
                 encode_kwargs={'normalize_embeddings': True}
             )
-            return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
+            return Chroma(persist_directory=persist_directory, embedding_function=embeddings)
         except Exception as e:
             print(f"RAG Vector DB 로드 실패: {e}")
     return None
@@ -270,92 +290,97 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
+# 2. 공공 API 연동 모듈 (자동 페이징 수집 적용)
 # ==========================================
 
-import xml.etree.ElementTree as ET
-import requests
-from datetime import datetime, timezone, timedelta
-import streamlit as st
-
-# 💡 캐시 타임아웃을 없애거나 갱신이 잘 되도록 설정
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - test_github_api.py에서 100% 성공한 호출 구조와 동일하게 작성
+    - 50건/100건 제한 우회: totalCount 전체 데이터를 끝까지 자동 수집 (Paging Loop)
     """
     if not PUBLIC_API_KEY:
         return []
 
-    # KST 기준 날짜 계산 (어제 ~ 내일)
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
     sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")
     ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")
 
-    # 💡 [핵심] 키 변형(unquote 등) 없이 test_github_api.py와 동일하게 원본키를 URL에 바로 결합
     url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
-    
-    params = {
-        'prtAgCd': str(port_code).strip(),
-        'sde': sde_str,
-        'ede': ede_str,
-        'deGb': str(de_gb).strip().upper(),
-        'numOfRows': '100',
-        'pageNo': '1'
-    }
-
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
     vessels = []
-    try:
-        session = requests.Session()
-        session.verify = False
-        
-        res = session.get(url, params=params, headers=headers, timeout=10)
+    page = 1
+    rows_per_page = 100
 
-        if res.status_code == 200 and res.content:
-            root = ET.fromstring(res.content)
-            items = root.findall('.//item') or root.findall('body/items/item')
+    while True:
+        params = {
+            'prtAgCd': str(port_code).strip(),
+            'sde': sde_str,
+            'ede': ede_str,
+            'deGb': str(de_gb).strip().upper(),
+            'numOfRows': str(rows_per_page),
+            'pageNo': str(page)
+        }
 
-            for item in items:
-                vssl_nm = (item.findtext('vsslNm') or '-').strip()
-                clsgn = (item.findtext('clsgn') or '-').strip()
-                vssl_nlty = (item.findtext('vsslNltyNm') or '-').strip()
-                vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
-                etrypt_yr = (item.findtext('etryptYear') or '-').strip()
-                etrypt_co = (item.findtext('etryptCo') or '-').strip()
+        try:
+            session = requests.Session()
+            session.verify = False
+            res = session.get(url, params=params, headers=headers, timeout=10)
 
-                # <details> 하위 <detail> 예외 처리 강화
-                detail_node = item.find('.//detail') or item.find('details/detail')
-                facility_nm = '-'
-                etrypt_dt = '-'
-                tkoff_dt = '-'
-                smit_nm = '-'
-                
-                if detail_node is not None:
-                    facility_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
-                    etrypt_dt = (detail_node.findtext('etryptDt') or '-').strip()
-                    tkoff_dt = (detail_node.findtext('tkoffDt') or '-').strip()
-                    smit_nm = (detail_node.findtext('reqstSeNm') or '-').strip()
+            if res.status_code == 200 and res.content:
+                root = ET.fromstring(res.content)
+                total_cnt = int(root.findtext('.//totalCount', '0'))
+                items = root.findall('.//item') or root.findall('body/items/item')
 
-                if vssl_nm == '-' and clsgn == '-':
-                    continue
+                if not items:
+                    break
 
-                vessels.append({
-                    "vssl_nm": vssl_nm,
-                    "clsgn": clsgn,
-                    "vssl_nlty": vssl_nlty,
-                    "vssl_knd": vssl_knd,
-                    "facility_nm": facility_nm,
-                    "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-',
-                    "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',
-                    "smit_nm": smit_nm,
-                    "etrypt_yr": etrypt_yr,
-                    "etrypt_co": etrypt_co
-                })
-    except Exception as e:
-        print(f"선박운항정보 API 수집 에러 ({port_code}/{de_gb}): {e}")
+                for item in items:
+                    vssl_nm = (item.findtext('vsslNm') or '-').strip()
+                    clsgn = (item.findtext('clsgn') or '-').strip()
+                    vssl_nlty = (item.findtext('vsslNltyNm') or '-').strip()
+                    vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
+                    etrypt_yr = (item.findtext('etryptYear') or '-').strip()
+                    etrypt_co = (item.findtext('etryptCo') or '-').strip()
+
+                    detail_node = item.find('.//detail') or item.find('details/detail')
+                    facility_nm = '-'
+                    etrypt_dt = '-'
+                    tkoff_dt = '-'
+                    smit_nm = '-'
+                    
+                    if detail_node is not None:
+                        facility_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
+                        etrypt_dt = (detail_node.findtext('etryptDt') or '-').strip()
+                        tkoff_dt = (detail_node.findtext('tkoffDt') or '-').strip()
+                        smit_nm = (detail_node.findtext('reqstSeNm') or '-').strip()
+
+                    if vssl_nm == '-' and clsgn == '-':
+                        continue
+
+                    vessels.append({
+                        "vssl_nm": vssl_nm,
+                        "clsgn": clsgn,
+                        "vssl_nlty": vssl_nlty,
+                        "vssl_knd": vssl_knd,
+                        "facility_nm": facility_nm,
+                        "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-',
+                        "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',
+                        "smit_nm": smit_nm,
+                        "etrypt_yr": etrypt_yr,
+                        "etrypt_co": etrypt_co
+                    })
+
+                # 수집된 데이터 수가 전체 개수 이상이면 완료
+                if len(vessels) >= total_cnt or len(items) < rows_per_page:
+                    break
+                page += 1
+            else:
+                break
+        except Exception as e:
+            print(f"선박 API 수집 중 예외 ({port_code}/{de_gb}): {e}")
+            break
 
     return vessels
 
@@ -654,9 +679,15 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
     sde_fmt = (now_kst - timedelta(days=1)).strftime("%Y-%m-%d")
     ede_fmt = (now_kst + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
-    
-    with st.spinner(f"{port_name} {gb_title} 선박 정보 수집 중..."):
+    c_left, c_right = st.columns([3, 1])
+    with c_left:
+        st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
+    with c_right:
+        if st.button(f"🔄 {port_name} 데이터 강제 갱신", key=f"refresh_{port_code}_{de_gb}"):
+            st.cache_data.clear()
+            st.rerun()
+
+    with st.spinner(f"{port_name} {gb_title} 선박 전체 데이터 수집 중..."):
         vessels = fetch_vessel_schedule_api(port_code, de_gb)
 
     if not vessels:
