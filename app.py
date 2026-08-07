@@ -290,15 +290,14 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (전체 응답 항목 수집)
+# 2. 공공 API 연동 모듈 (내외항구분명 표출 항목 추가)
 # ==========================================
 
 @st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - 응답 항목 전수 수집 (25개 이상 필드 완전 매핑)
-    - 사용자 지정 날짜(sde_str, ede_str) 기반 조회
+    - 응답 항목 전수 수집 (내외항구분명 포함 매핑)
     """
     if not PUBLIC_API_KEY:
         return []
@@ -334,38 +333,27 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
                     break
 
                 for item in items:
-                    # 기본 상위 항목 파싱
-                    prt_ag_cd = (item.findtext('prtAgCd') or '-').strip()
                     prt_ag_nm = (item.findtext('prtAgNm') or '-').strip()
                     etrypt_year = (item.findtext('etryptYear') or '-').strip()
                     etrypt_co = (item.findtext('etryptCo') or '-').strip()
                     clsgn = (item.findtext('clsgn') or '-').strip()
                     vssl_nm = (item.findtext('vsslNm') or '-').strip()
-                    vssl_nlty_cd = (item.findtext('vsslNltyCd') or '-').strip()
                     vssl_nlty_nm = (item.findtext('vsslNltyNm') or '-').strip()
-                    vssl_knd_cd = (item.findtext('vsslKndCd') or '-').strip()
                     vssl_knd_nm = (item.findtext('vsslKndNm') or '-').strip()
-                    etrypt_purps_cd = (item.findtext('etryptPurpsCd') or '-').strip()
                     etrypt_purps_nm = (item.findtext('etryptPurpsNm') or '-').strip()
                     
-                    frst_dpmprt_prt_nm = (item.findtext('frstDpmprtPrtNm') or '-').strip()
                     prvs_dpmprt_prt_nm = (item.findtext('prvsDpmprtPrtNm') or '-').strip()
                     nxlnpt_prt_nm = (item.findtext('nxlnptPrtNm') or '-').strip()
                     dstn_prt_nm = (item.findtext('dstnPrtNm') or '-').strip()
 
-                    # <details> 하위 노드 항목 파싱
                     detail_node = item.find('.//detail') or item.find('details/detail')
                     
                     reqst_se_nm = '-'
                     etrynd_nm = '-'
                     etrypt_dt = '-'
                     tkoff_dt = '-'
-                    ibobprt_nm = '-'
-                    laidup_fclty_cd = '-'
-                    laidup_fclty_sub_cd = '-'
+                    ibobprt_nm = '-'  # 내외항구분명
                     laidup_fclty_nm = '-'
-                    tug_yn = '-'
-                    piltg_yn = '-'
                     ldadng_frght_cl_cd = '-'
                     ldadng_ton = '-'
                     trnpdt_ton = '-'
@@ -382,12 +370,8 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
                         etrynd_nm = (detail_node.findtext('etryndNm') or '-').strip()
                         etrypt_dt = (detail_node.findtext('etryptDt') or '-').strip()
                         tkoff_dt = (detail_node.findtext('tkoffDt') or '-').strip()
-                        ibobprt_nm = (detail_node.findtext('ibobprtNm') or '-').strip()
-                        laidup_fclty_cd = (detail_node.findtext('laidupFcltyCd') or '-').strip()
-                        laidup_fclty_sub_cd = (detail_node.findtext('laidupFcltySubCd') or '-').strip()
+                        ibobprt_nm = (detail_node.findtext('ibobprtNm') or '-').strip()  # 💡 내외항구분명 파싱
                         laidup_fclty_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
-                        tug_yn = (detail_node.findtext('tugYn') or '-').strip()
-                        piltg_yn = (detail_node.findtext('piltgYn') or '-').strip()
                         ldadng_frght_cl_cd = (detail_node.findtext('ldadngFrghtClCd') or '-').strip()
                         ldadng_ton = (detail_node.findtext('ldadngTon') or '-').strip()
                         trnpdt_ton = (detail_node.findtext('trnpdtTon') or '-').strip()
@@ -403,32 +387,32 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
                         continue
 
                     vessels.append({
-                        # 요구된 25개 주요 수신 항목 전수 보관
-                        "prt_ag_nm": prt_ag_nm,                      # 항구청명
-                        "etrypt_year": etrypt_year,                  # 입항년도
-                        "etrypt_co": etrypt_co,                      # 입항횟수
-                        "clsgn": clsgn,                              # 호출부호
-                        "vssl_nm": vssl_nm,                          # 선박명
-                        "vssl_nlty_nm": vssl_nlty_nm,                # 선박국가명
-                        "vssl_knd_nm": vssl_knd_nm,                  # 선박종류명
-                        "etrypt_purps_nm": etrypt_purps_nm,          # 입항목적명
-                        "prvs_dpmprt_prt_nm": prvs_dpmprt_prt_nm,    # 전출항지항구명
-                        "nxlnpt_prt_nm": nxlnpt_prt_nm,              # 차출항지항구명
-                        "dstn_prt_nm": dstn_prt_nm,                  # 목적지항구명
-                        "etrynd_nm": etrynd_nm,                      # 입출항구분명
-                        "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-', # 입항일시
-                        "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',   # 출항일시
-                        "laidup_fclty_nm": laidup_fclty_nm,          # 계선시설명
-                        "ldadng_frght_cl_cd": ldadng_frght_cl_cd,    # 화물명세
-                        "ldadng_ton": ldadng_ton,                    # 적재톤수
-                        "trnpdt_ton": trnpdt_ton,                    # 환적톤수
-                        "landng_frght_ton": landng_frght_ton,        # 양하화물톤
-                        "ld_frght_ton": ld_frght_ton,                # 적하화물톤
-                        "grtg": grtg,                                # 총톤수
-                        "satmnt_entrps_nm": satmnt_entrps_nm,        # 신고업체명
-                        "crew_co": crew_co,                          # 선원수
-                        "tkoff_prrrn_dt": tkoff_prrrn_dt,            # 출항예정일시
-                        "dstn_etrypt_dt": dstn_etrypt_dt,            # 목적지입항예정일시
+                        "prt_ag_nm": prt_ag_nm,
+                        "etrypt_year": etrypt_year,
+                        "etrypt_co": etrypt_co,
+                        "clsgn": clsgn,
+                        "vssl_nm": vssl_nm,
+                        "vssl_nlty_nm": vssl_nlty_nm,
+                        "vssl_knd_nm": vssl_knd_nm,
+                        "etrypt_purps_nm": etrypt_purps_nm,
+                        "prvs_dpmprt_prt_nm": prvs_dpmprt_prt_nm,
+                        "nxlnpt_prt_nm": nxlnpt_prt_nm,
+                        "dstn_prt_nm": dstn_prt_nm,
+                        "etrynd_nm": etrynd_nm,
+                        "ibobprt_nm": ibobprt_nm,  # 💡 내외항구분명 추가
+                        "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-',
+                        "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',
+                        "laidup_fclty_nm": laidup_fclty_nm,
+                        "ldadng_frght_cl_cd": ldadng_frght_cl_cd,
+                        "ldadng_ton": ldadng_ton,
+                        "trnpdt_ton": trnpdt_ton,
+                        "landng_frght_ton": landng_frght_ton,
+                        "ld_frght_ton": ld_frght_ton,
+                        "grtg": grtg,
+                        "satmnt_entrps_nm": satmnt_entrps_nm,
+                        "crew_co": crew_co,
+                        "tkoff_prrrn_dt": tkoff_prrrn_dt,
+                        "dstn_etrypt_dt": dstn_etrypt_dt,
                         "reqst_se_nm": reqst_se_nm
                     })
 
@@ -889,8 +873,12 @@ def show_vessel_detail_dialog(v, port_code):
     else:
         st.info("💡 해당 선박의 화물 반출입 신고 내역이 없습니다.")
 
+# ==========================================
+# 4. 카드 UI 렌더링 함수 (내외항구분명 화면 표출)
+# ==========================================
+
 def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
-    """선박 1척에 대한 전체 25개 파라미터 상세 카드 UI"""
+    """선박 1척에 대한 전체 상세 카드 UI (내외항구분명 표출)"""
     expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
     
     with st.expander(expander_label, expanded=False):
@@ -909,6 +897,7 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
         with col2:
             st.markdown("**[운항 및 관제 일시]**")
             st.write(f"- **입출항구분명:** {v['etrynd_nm']} ({v['reqst_se_nm']})")
+            st.write(f"- **내외항구분명:** **{v['ibobprt_nm']}**")  # 💡 화면 표출 항목 추가
             st.write(f"- **입항목적명:** {v['etrypt_purps_nm']}")
             st.write(f"- **입항일시:** {v['etrypt_dt']}")
             st.write(f"- **출항일시:** {v['tkoff_dt']}")
@@ -929,7 +918,6 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
             st.write(f"- **적하화물톤:** {v['ld_frght_ton']} 톤")
 
         st.markdown("---")
-        # 💡 [요구사항] 버튼 명칭 변경 및 선박제원/화물 정보 팝업 띄우기
         if st.button(f"🔍 [{v['vssl_nm']}] 선박제원 및 화물반출입정보 조회", key=f"btn_spec_{port_code}_{de_gb}_{idx}", use_container_width=True):
             show_vessel_detail_dialog(v, port_code)
 
