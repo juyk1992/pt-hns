@@ -733,9 +733,11 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # ==========================================
 
 def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
-    """선박 1척에 대한 전체 25개 파라미터 상세 카드 UI"""
+    """선박 1척에 대한 전체 25개 파라미터 상세 카드 UI (기본 닫힘 세팅)"""
     expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
-    with st.expander(expander_label, expanded=True):
+    
+    # 💡 expanded=False 로 기본적으로 닫혀있고 클릭 시 펼쳐지도록 설정
+    with st.expander(expander_label, expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown("**[선박 및 국적 정보]**")
@@ -786,18 +788,31 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
 def render_vessel_tab_content(port_name, port_code, de_gb):
     gb_title = "입항" if de_gb == 'I' else "출항"
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    
-    # 💡 1. 사용자 지정 검색 기간 달력 (Date Input)
+    today_date = now_kst.date()
+
+    # 💡 1. 검색 기간 기본값: 오늘 ~ 오늘
     c_date1, c_date2, c_btn = st.columns([0.35, 0.35, 0.3])
     with c_date1:
-        start_date = st.date_input("조회 시작일", value=now_kst.date() - timedelta(days=1), key=f"sdate_{port_code}_{de_gb}")
+        start_date = st.date_input("조회 시작일", value=today_date, key=f"sdate_{port_code}_{de_gb}")
     with c_date2:
-        end_date = st.date_input("조회 종료일", value=now_kst.date() + timedelta(days=1), key=f"edate_{port_code}_{de_gb}")
+        end_date = st.date_input("조회 종료일", value=today_date, key=f"edate_{port_code}_{de_gb}")
     with c_btn:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 실시간 데이터 갱신", key=f"refresh_{port_code}_{de_gb}", use_container_width=True):
-            st.cache_data.clear()
-            st.rerun()
+        # 💡 "조회" 버튼을 클릭해야만 수신 수행
+        query_trigger = st.button("🔍 조회", key=f"search_btn_{port_code}_{de_gb}", use_container_width=True)
+
+    # 수신 트리거 상태 제어
+    state_key_fetched = f"fetched_{port_code}_{de_gb}"
+    state_key_vessels = f"vessels_{port_code}_{de_gb}"
+
+    if query_trigger:
+        st.cache_data.clear()
+        st.session_state[state_key_fetched] = True
+
+    # 최초 접속 시 자동 조회가 안 되도록 처리
+    if not st.session_state.get(state_key_fetched, False):
+        st.info(f"💡 날짜 설정 후 우측의 **[🔍 조회]** 버튼을 클릭하면 {port_name} {gb_title} 신고 선박 정보가 실시간 연동됩니다.")
+        return
 
     sde_str = start_date.strftime("%Y%m%d")
     ede_str = end_date.strftime("%Y%m%d")
@@ -810,24 +825,35 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
         vessels = fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str)
 
     if not vessels:
-        st.info(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없거나 API 수집 대기 중입니다.")
+        st.warning(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없습니다.")
         return
 
     st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다.")
 
-    # 💡 2. 전체보기 / 개별선박 선택 탭 구성
-    tab_all, tab_single = st.tabs(["📋 전체선박 목록 보기", "🔍 개별선박 선택 보기"])
+    # 💡 2. 단일 셀렉트박스 (전체보기 + 개별선박 선택 목록)
+    ALL_VIEW_OPTION = f"📋 전체선박 목록 보기 (총 {len(vessels)}척)"
+    select_options = [ALL_VIEW_OPTION] + [
+        f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}" 
+        for v in vessels
+    ]
 
-    with tab_all:
+    selected_option = st.selectbox(
+        "선박 필터링 선택 (개별 선박 선택 시 해당 선박만 표시됩니다):",
+        options=select_options,
+        key=f"filter_select_{port_code}_{de_gb}"
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 💡 3. 필터링 조건에 따른 목록 리스트 표출
+    if selected_option == ALL_VIEW_OPTION:
+        # 전체 목록 보기
         for idx, v in enumerate(vessels):
             render_vessel_item_card(v, port_name, port_code, de_gb, f"all_{idx}")
-
-    with tab_single:
-        # 드롭다운 선택용 라벨 리스트 생성
-        vessel_options = [f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} | 선종: {v['vssl_knd_nm']} | 계선장소: {v['laidup_fclty_nm']}" for v in vessels]
-        selected_idx = st.selectbox("모니터링할 선박을 선택하세요:", range(len(vessel_options)), format_func=lambda x: vessel_options[x], key=f"select_{port_code}_{de_gb}")
-        
-        if selected_idx is not None:
+    else:
+        # 선택된 단일 선박만 보기
+        selected_idx = select_options.index(selected_option) - 1
+        if 0 <= selected_idx < len(vessels):
             selected_vessel = vessels[selected_idx]
             render_vessel_item_card(selected_vessel, port_name, port_code, de_gb, f"single_{selected_idx}")
 
