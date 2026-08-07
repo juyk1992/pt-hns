@@ -1390,15 +1390,14 @@ if 'active_chem' in st.session_state:
       ])
 
       with t1:
-        st.markdown('**[해양수산부 위험물정보 API]**')
+        st.markdown("**[해양수산부 위험물정보 API]**")
         d = src.get('dgst', {})
+        # 💡 [수정] f-string 따옴표 닫기 연산 오류 수정
         st.write(
-            f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm',"
-            " '-')})"
+            f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm', '-')})"
         )
         st.write(
-            f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} /"
-            f" {d.get('kndNm', '-')}"
+            f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} / {d.get('kndNm', '-')}"
         )
         st.write(f"- **비상조치코드(EmS):** {d.get('emergManagtCd', '-')}")
         st.write(f"- **선박 적재방법:** {d.get('ldadngMth', '-')}")
