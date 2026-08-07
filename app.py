@@ -6,6 +6,7 @@ import os
 import json
 import base64
 import urllib3
+import time
 from datetime import datetime, timezone, timedelta
 from google import genai
 
@@ -13,7 +14,7 @@ from google import genai
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
-# SSL 경고창 비활성화
+# SSL 경고창 및 검증 비활성화 (공공 API SSL 검증 에러 방지)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
@@ -270,23 +271,21 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (Open API 7종 종합 연동)
+# 2. 공공 Open API 연동 모듈 (SSL 에러 방어 적용)
 # ==========================================
 
-@st.cache_data(ttl=1800)  # 30분간 캐싱하여 여유 있게 안정적 모니터링 유지
+@st.cache_data(ttl=600)
 def fetch_port_vessels_api(port_code):
-    """[선박운항정보 Open API (VsslEtrynd5)] 항만별 입출항 선박 기본 목록 최우선 수집"""
+    """[선박운항정보 Open API (VsslEtrynd5)] 실시간 입출항 선박 수집"""
     if not PUBLIC_API_KEY:
         return []
     
-    # KST 기준 최근 5일~오늘 조회 (충분한 조회 기간 확보)
     now = datetime.now(timezone.utc) + timedelta(hours=9)
     ede = now.strftime("%Y%m%d")
     sde = (now - timedelta(days=5)).strftime("%Y%m%d")
     
-    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
+    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
-        'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': port_code,
         'sde': sde,
         'ede': ede,
@@ -298,9 +297,9 @@ def fetch_port_vessels_api(port_code):
     vessels = []
     try:
         session = requests.Session()
-        session.verify = False
+        session.verify = False  # SSL 검증 무시
         
-        res = session.get(url, params=params, timeout=10)
+        res = session.get(url, params=params, timeout=10, verify=False)
         
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
@@ -321,7 +320,7 @@ def fetch_port_vessels_api(port_code):
                 if not clsgn or not vssl_nm:
                     continue
                 
-                # 케미칼/탱커/가스선 등 선종 명칭으로 위험물 가능 선박 1차 식별
+                # 선종 기준 HNS 위험물 선박 가능성 1차 식별
                 is_tanker = any(k in vssl_knd for k in ['케미칼', '탱커', '가스', '위험물', '유조선', 'LPG', 'LNG', 'BULK'])
                 
                 vessels.append({
@@ -334,52 +333,14 @@ def fetch_port_vessels_api(port_code):
                     "etrypt_yr": etrypt_yr,
                     "etrypt_co": etrypt_co,
                     "unno": "확인필요" if is_tanker else "0000",
-                    "chem_name": f"{vssl_knd} (적재 화물 확인 가능)" if is_tanker else "일반화물",
+                    "chem_name": f"{vssl_knd} (위험화물 적재선)" if is_tanker else "일반화물",
                     "is_hns": is_tanker,
                     "wt_ton": "-"
                 })
-                
     except Exception as e:
-        print(f"선박운항정보 API 연동 에러 ({port_code}): {e}")
+        print(f"선박운항정보 API 에러 ({port_code}): {e}")
         
     return vessels
-
-def fetch_vessel_cargo_api(port_code, etrypt_year, etrypt_co, clsgn):
-    """[외항/내항 화물반출입 API] 필요 시 단일 선박별 위험물 품목 명시적 조회"""
-    res_data = {"unno": "0000", "chem_name": "일반화물/기타", "is_hns": False, "wt_ton": "-"}
-    if not PUBLIC_API_KEY or not clsgn:
-        return res_data
-        
-    url_out = "https://apis.data.go.kr/1192000/CargFrghtOut4/Info4"
-    params = {
-        'serviceKey': PUBLIC_API_KEY,
-        'prtAgCd': port_code,
-        'etryptYear': etrypt_year,
-        'etryptCo': etrypt_co,
-        'clsgn': clsgn,
-        'numOfRows': '1',
-        'pageNo': '1'
-    }
-    try:
-        res = requests.get(url_out, params=params, timeout=5, verify=False)
-        if res.status_code == 200:
-            root = ET.fromstring(res.content)
-            item = root.find('.//item')
-            if item is not None:
-                unno = (item.findtext('unno') or '').strip()
-                prdlst_nm = (item.findtext('frghtPrdlstKorNm') or '').strip()
-                wt_ton = (item.findtext('wtTon') or '-').strip()
-                
-                if unno and unno not in ["0000", "", "-"]:
-                    res_data["unno"] = unno.zfill(4)
-                    res_data["chem_name"] = prdlst_nm or "HNS 위험물"
-                    res_data["is_hns"] = True
-                    res_data["wt_ton"] = wt_ton
-                    return res_data
-    except Exception:
-        pass
-
-    return res_data
 
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
@@ -399,7 +360,7 @@ def fetch_dgst_info(unno):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=8)
+        res = session.get(url, params=params, timeout=8, verify=False)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
@@ -433,7 +394,7 @@ def fetch_chem_safety_info(cas_no):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=8)
+        res = session.get(url, params=params, timeout=8, verify=False)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
@@ -472,7 +433,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
             'pageNo': '1'
         }
         try:
-            res = requests.get(list_url, params=params, timeout=5)
+            res = requests.get(list_url, params=params, timeout=5, verify=False)
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
             
@@ -517,7 +478,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
         detail_url = f"{base_url}/{op_name}"
         params = {'serviceKey': PUBLIC_API_KEY, 'chemId': chem_id}
         try:
-            res = requests.get(detail_url, params=params, timeout=4)
+            res = requests.get(detail_url, params=params, timeout=4, verify=False)
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
             for item in items:
@@ -671,9 +632,9 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # ==========================================
 def render_port_dashboard(port_name, port_code):
     st.markdown(f"#### 📊 {port_name} 실시간 선박 및 위험화물 모니터링 (Open API)")
-    st.caption("해양수산부 선박운항정보 및 외/내항 화물반출입 Open API 데이터를 실시간 연동합니다.")
+    st.caption("해양수산부 선박운항정보 Open API 데이터를 실시간 연동합니다.")
     
-    with st.spinner(f"{port_name} 실시간 선박 및 화물 정보 연동 중..."):
+    with st.spinner(f"{port_name} 실시간 선박 정보 연동 중..."):
         vessels = fetch_port_vessels_api(port_code)
         
     if not vessels:
@@ -685,25 +646,25 @@ def render_port_dashboard(port_name, port_code):
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric(label="현재 입출항 선박 수", value=f"{len(vessels)} 척")
+        st.metric(label="현재 입출항 신고 선박 수", value=f"{len(vessels)} 척")
     with col2:
-        st.metric(label="🚨 HNS(위험물) 적재 선박", value=f"{len(hns_vessels)} 척")
+        st.metric(label="🚨 HNS(위험물) 주요 추정 선박", value=f"{len(hns_vessels)} 척")
         
-    tab1, tab2 = st.tabs(["🔥 위험물(HNS) 적재 선박", "🚢 전체 입출항 선박 현황"])
+    tab1, tab2 = st.tabs(["🔥 위험물(HNS) 추정 선박", "🚢 전체 입출항 선박 현황"])
     
     with tab1:
         if not hns_vessels:
-            st.success("✅ 현재 항내 위험물(HNS) 적재 신고 선박이 없습니다.")
+            st.success("✅ 현재 항내 위험물(HNS) 주요 관련 선박이 없습니다.")
         else:
             for idx, v in enumerate(hns_vessels):
                 with st.expander(f"🚨 [{v['vssl_nm']}] (호출부호: {v['clsgn']}) ｜ 선석: {v['facility']} ｜ 입항: {v['etrypt_dt']}"):
-                    st.markdown(f"**국적:** {v['vssl_nlty']} &nbsp;\|&nbsp; **선종:** {v['vssl_knd']} &nbsp;\|&nbsp; **화물중량:** {v['wt_ton']} 톤")
+                    st.markdown(f"**국적:** {v['vssl_nlty']} &nbsp;\|&nbsp; **선종:** {v['vssl_knd']}")
                     st.markdown(f"• <span class='badge-unno'>UN {v['unno']}</span> &nbsp; **{v['chem_name']}**", unsafe_allow_html=True)
                     
                     if st.button("🤖 AI 가이드 생성", key=f"btn_hns_{port_code}_{idx}", use_container_width=True):
-                        mapped_info = map_search_query_with_gemini(v['chem_name'])
-                        st.session_state['active_chem'] = mapped_info.get("chem_ko", v['chem_name'])
-                        st.session_state['active_unno'] = v['unno'] if v['unno'] != "0000" else mapped_info.get("unno", "0000")
+                        mapped_info = map_search_query_with_gemini(v['vssl_knd'])
+                        st.session_state['active_chem'] = mapped_info.get("chem_ko", v['vssl_knd'])
+                        st.session_state['active_unno'] = mapped_info.get("unno", "0000")
                         st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
                         st.session_state['active_ship'] = f"[{port_name}] {v['vssl_nm']}"
                         st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
@@ -713,7 +674,7 @@ def render_port_dashboard(port_name, port_code):
 
     with tab2:
         st.dataframe(
-            df_vessels[['vssl_nm', 'clsgn', 'vssl_knd', 'facility', 'etrypt_dt', 'chem_name', 'unno']],
+            df_vessels[['vssl_nm', 'clsgn', 'vssl_knd', 'facility', 'etrypt_dt']],
             use_container_width=True
         )
 
