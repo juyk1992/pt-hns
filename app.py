@@ -66,13 +66,13 @@ kcg_logo_b64 = get_base64_logo(KCG_LOGO_PATH)
 
 # 페이지 설정
 st.set_page_config(
-    page_title='평택해양경찰서 HNS AI 대응 시스템 (Vision)',
+    page_title='평택해양경찰서 HNS AI 대응 시스템',
     page_icon=KCG_LOGO_PATH if os.path.exists(KCG_LOGO_PATH) else '🚢',
     layout='wide',
     initial_sidebar_state='collapsed',
 )
 
-# Reflex.dev 감성 Light UI + 모바일 완벽 가시성 보장 CSS
+# Light UI + 모바일 가시성 CSS
 st.markdown(
     """
 <style>
@@ -1272,9 +1272,9 @@ if kcg_logo_b64:
     <div class="hero-container">
         <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 6px;">
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
-            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템 (Vision)</div>
+            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
         </div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 원본 스캔 이미지, HNS 대응가이드) + Gemini Vision AI</div>
+        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """,
       unsafe_allow_html=True,
@@ -1283,8 +1283,8 @@ else:
   st.markdown(
       """
     <div class="hero-container">
-        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템 (Vision)</div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 원본 스캔 이미지, HNS 대응가이드) + Gemini Vision AI</div>
+        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템</div>
+        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """,
       unsafe_allow_html=True,
@@ -1356,7 +1356,7 @@ if 'active_chem' in st.session_state:
 
   st.caption(
       '⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS'
-      ' 정보집 스캔 이미지 DB, HNS 대응가이드를 통합한 Gemini Vision'
+      ' 정보집, HNS 대응가이드를 통합한 Gemini RAG'
       ' 모델로 AI 환각 현상을 최소화했습니다.'
   )
 
@@ -1366,7 +1366,7 @@ if 'active_chem' in st.session_state:
       or not st.session_state['active_summary']
   ):
     with st.spinner(
-        'HNS 정보집 PDF + 대응가이드 PDF 이미지 렌더링 및 Gemini Vision 종합'
+        'HNS 정보집 PDF + 대응가이드 PDF 이미지 렌더링 및 Gemini 종합'
         ' 분석 중...'
     ):
       dgst_info = fetch_dgst_info(unno)
@@ -1411,7 +1411,7 @@ if 'active_chem' in st.session_state:
   st.markdown(st.session_state['active_summary'])
 
   # ------------------------------------------
-  # 📚 활용 원본 자료 확인 탭 (진짜 스캔 이미지 뷰어 제공)
+  # 📚 활용 원본 자료 확인 탭 (스캔 이미지 뷰어 제공)
   # ------------------------------------------
   if 'active_source_data' in st.session_state:
     src = st.session_state['active_source_data']
@@ -1421,7 +1421,7 @@ if 'active_chem' in st.session_state:
       t1, t2, t3, t4, t5 = st.tabs([
           '🚢 해수부 위험물정보',
           '🛡️ 화학물질안전원',
-          '🖼️ 해경 HNS 정보집 원본',
+          '🖼️ 해경 HNS 정보집',
           '🧠 해경 HNS 대응가이드',
           '🏥 안전보건공단 MSDS',
       ])
@@ -1450,7 +1450,7 @@ if 'active_chem' in st.session_state:
         st.write(f"- **기타 유의사항:** {s.get('etc', '-')}")
 
       with t3:
-        st.markdown('**[해양경찰청 HNS 정보집 실시간 PDF 원본 스캔]**')
+        st.markdown('**[해양경찰청 HNS 정보집]**')
         hns_img = src.get('hns_image')
         hns_pno = src.get('hns_page_no')
         if hns_img and hns_pno:
@@ -1469,7 +1469,7 @@ if 'active_chem' in st.session_state:
           )
 
       with t4:
-        st.markdown('**[해양경찰청 HNS 해양사고 대응 가이드 원본 스캔]**')
+        st.markdown('**[해양경찰청 HNS 해양사고 대응 가이드]**')
         rag_imgs = src.get('rag_images', [])
         if rag_imgs:
           for r_item in rag_imgs:
