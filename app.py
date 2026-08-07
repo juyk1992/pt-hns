@@ -263,7 +263,7 @@ def load_kcg_vectorstore():
                 model_kwargs={'device': 'cpu'},
                 encode_kwargs={'normalize_embeddings': True}
             )
-            return Chroma(persist_dir=persist_dir, embedding_function=embeddings)
+            return Chroma(persist_directory=persist_dir, embedding_function=embeddings)
         except Exception as e:
             print(f"RAG Vector DB 로드 실패: {e}")
     return None
