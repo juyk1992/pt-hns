@@ -201,71 +201,96 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
 
 # ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 및 페이지 실시간 고화질 렌더링
+# 1. 🖼️ PDF 인덱스 맵 생성 (실제 PDF 물리 오프셋 +6쪽 보정 반영)
 # ==========================================
+
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
-  """PDF 전체 페이지를 스캔하여 UN번호, 물질명, 페이지 번호를 맵핑"""
-  if not os.path.exists(pdf_path):
-    return []
+    """
+    HNS 정보집 PDF 스캔 (인쇄 쪽수와 PDF 물리 페이지 간 +6쪽 차이 보정)
+    - 예: 인쇄 34쪽(과산화수소) = PDF 40번째 페이지 (index 39)
+    - 예: 인쇄 215쪽(황화수소) = PDF 221번째 페이지 (index 220)
+    """
+    if not os.path.exists(pdf_path):
+        return []
 
-  index_list = []
-  with pdfplumber.open(pdf_path) as pdf:
-    # 34페이지(인덱스 33)부터 215페이지(인덱스 214) 물질 영역 스캔
-    for idx in range(33, min(215, len(pdf.pages))):
-      page = pdf.pages[idx]
-      text = page.extract_text() or ''
+    index_list = []
+    with pdfplumber.open(pdf_path) as pdf:
+        # 실제 본문 물질 페이지: PDF 물리 인덱스 39(40쪽) ~ 220(221쪽)
+        start_idx = 39
+        end_idx = min(221, len(pdf.pages))
+        
+        for idx in range(start_idx, end_idx):
+            page = pdf.pages[idx]
+            text = page.extract_text() or ""
+            
+            if not text.strip():
+                continue
 
-      unno_match = re.search(r'UN번호\s*(\d{4})', text)
-      unno = unno_match.group(1).strip() if unno_match else ''
+            unno_match = re.search(r'UN번호\s*(\d{4})', text)
+            unno = unno_match.group(1).strip() if unno_match else ""
+            
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+            title = lines[0] if lines else ""
+            
+            synonym_match = re.search(r'유사명\s*([^\n]+)', text)
+            synonyms = synonym_match.group(1).strip() if synonym_match else ""
 
-      lines = [line.strip() for line in text.split('\n') if line.strip()]
-      title = lines[0] if lines else ''
+            # 페이지 하단/우측의 실제 인쇄 쪽수 파싱 (없을 경우 오프셋 계산: 물리페이지 - 6)
+            printed_page_no = idx - 5  # 기본 보정값 (40쪽 = 인쇄 34쪽)
+            
+            # 페이지 내 인쇄된 숫자 추출 시도
+            page_num_match = re.search(r'(\d{2,3})\s*$', text)
+            if page_num_match:
+                try:
+                    p_val = int(page_num_match.group(1))
+                    if 34 <= p_val <= 215:
+                        printed_page_no = p_val
+                except ValueError:
+                    pass
 
-      synonym_match = re.search(r'유사명\s*([^\n]+)', text)
-      synonyms = synonym_match.group(1).strip() if synonym_match else ''
-
-      index_list.append({
-          'page_index': idx,  # 0-based index
-          'page_no': idx + 1,  # 1-based page number
-          'unno': unno,
-          'title': title,
-          'synonyms': synonyms,
-      })
-  return index_list
-
+            index_list.append({
+                "page_index": idx,           # PDF 내부 0-based 물리 인덱스 (예: 39)
+                "physical_page_no": idx + 1, # PDF 물리 페이지 번호 (예: 40)
+                "printed_page_no": printed_page_no, # 정보집 인쇄 쪽수 (예: 34)
+                "unno": unno,
+                "title": title,
+                "synonyms": synonyms
+            })
+    return index_list
 
 hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 
 def get_hns_page_image(unno_or_query):
-  """UN번호 또는 물질명으로 HNS 정보집 PDF 페이지를 찾아 300DPI PIL 이미지로 렌더링"""
-  if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
-    return None, None
+    """UN번호 또는 물질명으로 HNS 정보집 PDF 물리 페이지를 정확히 찾아 300DPI PIL 이미지로 렌더링"""
+    if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
+        return None, None
 
-  q = str(unno_or_query).strip().upper()
-  target_index = None
+    q = str(unno_or_query).strip().upper()
+    target_item = None
 
-  for item in hns_pdf_index:
-    unno = str(item['unno']).strip()
-    title = item['title'].upper()
-    synonyms = item['synonyms'].upper()
+    for item in hns_pdf_index:
+        unno = str(item['unno']).strip()
+        title = item['title'].upper()
+        synonyms = item['synonyms'].upper()
 
-    if (q and q == unno) or (q in title) or (q in synonyms):
-      target_index = item['page_index']
-      break
+        if (q and q == unno) or (q in title) or (q in synonyms):
+            target_item = item
+            break
 
-  if target_index is None:
-    return None, None
+    if target_item is None:
+        return None, None
 
-  try:
-    with pdfplumber.open(HNS_PDF_PATH) as pdf:
-      page = pdf.pages[target_index]
-      pix = page.to_image(resolution=300)
-      return pix.original, target_index + 1
-  except Exception as e:
-    print(f'HNS 정보집 PDF 이미지 렌더링 에러: {e}')
-    return None, None
+    try:
+        with pdfplumber.open(HNS_PDF_PATH) as pdf:
+            # 보정된 정확한 물리 인덱스로 페이지 자르기
+            page = pdf.pages[target_item['page_index']]
+            pix = page.to_image(resolution=300)
+            return pix.original, target_item['printed_page_no']
+    except Exception as e:
+        print(f"HNS 정보집 PDF 이미지 렌더링 에러: {e}")
+        return None, None
 
 
 # 🧠 RAG Vector DB 로드 모듈
