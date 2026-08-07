@@ -290,29 +290,25 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 API 연동 모듈 (자동 페이징 수집 적용)
+# 2. 공공 API 연동 모듈 (전체 응답 항목 수집)
 # ==========================================
 
 @st.cache_data(ttl=300)
-def fetch_vessel_schedule_api(port_code, de_gb):
+def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - numOfRows 규격 한도(50) 준수
-    - 50건 초과 시 pageNo 자동 증가 페이징 루프 적용으로 totalCount 전체 수집
+    - 응답 항목 전수 수집 (25개 이상 필드 완전 매핑)
+    - 사용자 지정 날짜(sde_str, ede_str) 기반 조회
     """
     if not PUBLIC_API_KEY:
         return []
-
-    now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")
-    ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")
 
     url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
     vessels = []
     page = 1
-    rows_per_page = 50  # 💡 명세서 규격상 최대값인 50 설정
+    rows_per_page = 50
 
     while True:
         params = {
@@ -338,42 +334,104 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                     break
 
                 for item in items:
-                    vssl_nm = (item.findtext('vsslNm') or '-').strip()
-                    clsgn = (item.findtext('clsgn') or '-').strip()
-                    vssl_nlty = (item.findtext('vsslNltyNm') or '-').strip()
-                    vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
-                    etrypt_yr = (item.findtext('etryptYear') or '-').strip()
+                    # 기본 상위 항목 파싱
+                    prt_ag_cd = (item.findtext('prtAgCd') or '-').strip()
+                    prt_ag_nm = (item.findtext('prtAgNm') or '-').strip()
+                    etrypt_year = (item.findtext('etryptYear') or '-').strip()
                     etrypt_co = (item.findtext('etryptCo') or '-').strip()
+                    clsgn = (item.findtext('clsgn') or '-').strip()
+                    vssl_nm = (item.findtext('vsslNm') or '-').strip()
+                    vssl_nlty_cd = (item.findtext('vsslNltyCd') or '-').strip()
+                    vssl_nlty_nm = (item.findtext('vsslNltyNm') or '-').strip()
+                    vssl_knd_cd = (item.findtext('vsslKndCd') or '-').strip()
+                    vssl_knd_nm = (item.findtext('vsslKndNm') or '-').strip()
+                    etrypt_purps_cd = (item.findtext('etryptPurpsCd') or '-').strip()
+                    etrypt_purps_nm = (item.findtext('etryptPurpsNm') or '-').strip()
+                    
+                    frst_dpmprt_prt_nm = (item.findtext('frstDpmprtPrtNm') or '-').strip()
+                    prvs_dpmprt_prt_nm = (item.findtext('prvsDpmprtPrtNm') or '-').strip()
+                    nxlnpt_prt_nm = (item.findtext('nxlnptPrtNm') or '-').strip()
+                    dstn_prt_nm = (item.findtext('dstnPrtNm') or '-').strip()
 
+                    # <details> 하위 노드 항목 파싱
                     detail_node = item.find('.//detail') or item.find('details/detail')
-                    facility_nm = '-'
+                    
+                    reqst_se_nm = '-'
+                    etrynd_nm = '-'
                     etrypt_dt = '-'
                     tkoff_dt = '-'
-                    smit_nm = '-'
-                    
+                    ibobprt_nm = '-'
+                    laidup_fclty_cd = '-'
+                    laidup_fclty_sub_cd = '-'
+                    laidup_fclty_nm = '-'
+                    tug_yn = '-'
+                    piltg_yn = '-'
+                    ldadng_frght_cl_cd = '-'
+                    ldadng_ton = '-'
+                    trnpdt_ton = '-'
+                    landng_frght_ton = '-'
+                    ld_frght_ton = '-'
+                    grtg = '-'
+                    satmnt_entrps_nm = '-'
+                    crew_co = '-'
+                    tkoff_prrrn_dt = '-'
+                    dstn_etrypt_dt = '-'
+
                     if detail_node is not None:
-                        facility_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
+                        reqst_se_nm = (detail_node.findtext('reqstSeNm') or '-').strip()
+                        etrynd_nm = (detail_node.findtext('etryndNm') or '-').strip()
                         etrypt_dt = (detail_node.findtext('etryptDt') or '-').strip()
                         tkoff_dt = (detail_node.findtext('tkoffDt') or '-').strip()
-                        smit_nm = (detail_node.findtext('reqstSeNm') or '-').strip()
+                        ibobprt_nm = (detail_node.findtext('ibobprtNm') or '-').strip()
+                        laidup_fclty_cd = (detail_node.findtext('laidupFcltyCd') or '-').strip()
+                        laidup_fclty_sub_cd = (detail_node.findtext('laidupFcltySubCd') or '-').strip()
+                        laidup_fclty_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
+                        tug_yn = (detail_node.findtext('tugYn') or '-').strip()
+                        piltg_yn = (detail_node.findtext('piltgYn') or '-').strip()
+                        ldadng_frght_cl_cd = (detail_node.findtext('ldadngFrghtClCd') or '-').strip()
+                        ldadng_ton = (detail_node.findtext('ldadngTon') or '-').strip()
+                        trnpdt_ton = (detail_node.findtext('trnpdtTon') or '-').strip()
+                        landng_frght_ton = (detail_node.findtext('landngFrghtTon') or '-').strip()
+                        ld_frght_ton = (detail_node.findtext('ldFrghtTon') or '-').strip()
+                        grtg = (detail_node.findtext('grtg') or '-').strip()
+                        satmnt_entrps_nm = (detail_node.findtext('satmntEntrpsNm') or '-').strip()
+                        crew_co = (detail_node.findtext('crewCo') or '-').strip()
+                        tkoff_prrrn_dt = (detail_node.findtext('tkoffPrrrnDt') or '-').strip()
+                        dstn_etrypt_dt = (detail_node.findtext('dstnEtryptDt') or '-').strip()
 
                     if vssl_nm == '-' and clsgn == '-':
                         continue
 
                     vessels.append({
-                        "vssl_nm": vssl_nm,
-                        "clsgn": clsgn,
-                        "vssl_nlty": vssl_nlty,
-                        "vssl_knd": vssl_knd,
-                        "facility_nm": facility_nm,
-                        "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-',
-                        "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',
-                        "smit_nm": smit_nm,
-                        "etrypt_yr": etrypt_yr,
-                        "etrypt_co": etrypt_co
+                        # 요구된 25개 주요 수신 항목 전수 보관
+                        "prt_ag_nm": prt_ag_nm,                      # 항구청명
+                        "etrypt_year": etrypt_year,                  # 입항년도
+                        "etrypt_co": etrypt_co,                      # 입항횟수
+                        "clsgn": clsgn,                              # 호출부호
+                        "vssl_nm": vssl_nm,                          # 선박명
+                        "vssl_nlty_nm": vssl_nlty_nm,                # 선박국가명
+                        "vssl_knd_nm": vssl_knd_nm,                  # 선박종류명
+                        "etrypt_purps_nm": etrypt_purps_nm,          # 입항목적명
+                        "prvs_dpmprt_prt_nm": prvs_dpmprt_prt_nm,    # 전출항지항구명
+                        "nxlnpt_prt_nm": nxlnpt_prt_nm,              # 차출항지항구명
+                        "dstn_prt_nm": dstn_prt_nm,                  # 목적지항구명
+                        "etrynd_nm": etrynd_nm,                      # 입출항구분명
+                        "etrypt_dt": etrypt_dt.replace('T', ' ') if etrypt_dt != '-' else '-', # 입항일시
+                        "tkoff_dt": tkoff_dt.replace('T', ' ') if tkoff_dt != '-' else '-',   # 출항일시
+                        "laidup_fclty_nm": laidup_fclty_nm,          # 계선시설명
+                        "ldadng_frght_cl_cd": ldadng_frght_cl_cd,    # 화물명세
+                        "ldadng_ton": ldadng_ton,                    # 적재톤수
+                        "trnpdt_ton": trnpdt_ton,                    # 환적톤수
+                        "landng_frght_ton": landng_frght_ton,        # 양하화물톤
+                        "ld_frght_ton": ld_frght_ton,                # 적하화물톤
+                        "grtg": grtg,                                # 총톤수
+                        "satmnt_entrps_nm": satmnt_entrps_nm,        # 신고업체명
+                        "crew_co": crew_co,                          # 선원수
+                        "tkoff_prrrn_dt": tkoff_prrrn_dt,            # 출항예정일시
+                        "dstn_etrypt_dt": dstn_etrypt_dt,            # 목적지입항예정일시
+                        "reqst_se_nm": reqst_se_nm
                     })
 
-                # 💡 현재 수집된 총 개수가 totalCount 이상이거나 더 이상 가져올 항목이 없으면 루프 종료
                 if len(vessels) >= total_cnt or len(items) < rows_per_page:
                     break
                 page += 1
@@ -674,28 +732,82 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # 4. 항만별 선박 모니터링 UI 렌더링 함수
 # ==========================================
 
+def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
+    """선박 1척에 대한 전체 25개 파라미터 상세 카드 UI"""
+    expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
+    with st.expander(expander_label, expanded=True):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown("**[선박 및 국적 정보]**")
+            st.write(f"- **항구청명:** {v['prt_ag_nm']}")
+            st.write(f"- **선박명:** **{v['vssl_nm']}**")
+            st.write(f"- **호출부호:** `{v['clsgn']}`")
+            st.write(f"- **선박국가명:** {v['vssl_nlty_nm']}")
+            st.write(f"- **선박종류명:** {v['vssl_knd_nm']}")
+            st.write(f"- **입항년도/횟수:** {v['etrypt_year']}년 / {v['etrypt_co']}회")
+            st.write(f"- **총톤수:** {v['grtg']} 톤")
+            st.write(f"- **선원수:** {v['crew_co']} 명")
+
+        with col2:
+            st.markdown("**[운항 및 관제 일시]**")
+            st.write(f"- **입출항구분명:** {v['etrynd_nm']} ({v['reqst_se_nm']})")
+            st.write(f"- **입항목적명:** {v['etrypt_purps_nm']}")
+            st.write(f"- **입항일시:** {v['etrypt_dt']}")
+            st.write(f"- **출항일시:** {v['tkoff_dt']}")
+            st.write(f"- **출항예정일시:** {v['tkoff_prrrn_dt']}")
+            st.write(f"- **목적지입항예정일시:** {v['dstn_etrypt_dt']}")
+            st.write(f"- **계선시설명:** {v['laidup_fclty_nm']}")
+            st.write(f"- **신고업체명:** {v['satmnt_entrps_nm']}")
+
+        with col3:
+            st.markdown("**[항로 및 화물 명세]**")
+            st.write(f"- **전출항지항구명:** {v['prvs_dpmprt_prt_nm']}")
+            st.write(f"- **차출항지항구명:** {v['nxlnpt_prt_nm']}")
+            st.write(f"- **목적지항구명:** {v['dstn_prt_nm']}")
+            st.write(f"- **화물명세 (코드):** {v['ldadng_frght_cl_cd']}")
+            st.write(f"- **적재톤수:** {v['ldadng_ton']} 톤")
+            st.write(f"- **환적톤수:** {v['trnpdt_ton']} 톤")
+            st.write(f"- **양하화물톤:** {v['landng_frght_ton']} 톤")
+            st.write(f"- **적하화물톤:** {v['ld_frght_ton']} 톤")
+
+        st.markdown("---")
+        if st.button(f"🤖 [{v['vssl_nm']}] 선종 기준 AI 대응가이드 생성", key=f"btn_vssl_{port_code}_{de_gb}_{idx}", use_container_width=True):
+            mapped_info = map_search_query_with_gemini(v['vssl_knd_nm'])
+            st.session_state['active_chem'] = mapped_info.get("chem_ko", v['vssl_knd_nm'])
+            st.session_state['active_unno'] = mapped_info.get("unno", "0000")
+            st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
+            st.session_state['active_ship'] = f"[{port_name} {v['etrynd_nm']}] {v['vssl_nm']} ({v['vssl_knd_nm']})"
+            st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
+            st.session_state['active_summary'] = ""
+            st.session_state['active_key_changed'] = True
+            st.rerun()
+
+
 def render_vessel_tab_content(port_name, port_code, de_gb):
     gb_title = "입항" if de_gb == 'I' else "출항"
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    sde_fmt = (now_kst - timedelta(days=1)).strftime("%Y-%m-%d")
-    ede_fmt = (now_kst + timedelta(days=1)).strftime("%Y-%m-%d")
-
-    # 💡 좌측은 제목, 우측 끝에 버튼 배치 (공간 자동 분할)
-    col_title, col_btn = st.columns([0.8, 0.2])
     
-    with col_title:
-        st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
-        
-    with col_btn:
-        # 우측 정렬을 위해 약간의 상단 여백 보정 및 버튼 생성
-        st.markdown("<div style='text-align: right;'>", unsafe_allow_html=True)
-        if st.button(f"🔄 실시간 데이터 갱신", key=f"refresh_{port_code}_{de_gb}", use_container_width=True):
+    # 💡 1. 사용자 지정 검색 기간 달력 (Date Input)
+    c_date1, c_date2, c_btn = st.columns([0.35, 0.35, 0.3])
+    with c_date1:
+        start_date = st.date_input("조회 시작일", value=now_kst.date() - timedelta(days=1), key=f"sdate_{port_code}_{de_gb}")
+    with c_date2:
+        end_date = st.date_input("조회 종료일", value=now_kst.date() + timedelta(days=1), key=f"edate_{port_code}_{de_gb}")
+    with c_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔄 실시간 데이터 갱신", key=f"refresh_{port_code}_{de_gb}", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    with st.spinner(f"{port_name} {gb_title} 선박 전체 데이터 수집 중..."):
-        vessels = fetch_vessel_schedule_api(port_code, de_gb)
+    sde_str = start_date.strftime("%Y%m%d")
+    ede_str = end_date.strftime("%Y%m%d")
+    sde_fmt = start_date.strftime("%Y-%m-%d")
+    ede_fmt = end_date.strftime("%Y-%m-%d")
+
+    st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
+
+    with st.spinner(f"{port_name} {gb_title} 전체 선박 정보 수집 중..."):
+        vessels = fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str)
 
     if not vessels:
         st.info(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없거나 API 수집 대기 중입니다.")
@@ -703,32 +815,21 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
 
     st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다.")
 
-    for idx, v in enumerate(vessels):
-        expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd']} ｜ 계선장소: {v['facility_nm']}"
-        with st.expander(expander_label):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"- **선명:** {v['vssl_nm']}")
-                st.write(f"- **호출부호:** `{v['clsgn']}`")
-                st.write(f"- **국적:** {v['vssl_nlty']}")
-                st.write(f"- **선종:** {v['vssl_knd']}")
-            with col2:
-                st.write(f"- **신고구분:** {v['smit_nm']}")
-                st.write(f"- **계선장소:** {v['facility_nm']}")
-                st.write(f"- **입항일시:** {v['etrypt_dt']}")
-                st.write(f"- **출항일시:** {v['tkoff_dt']}")
+    # 💡 2. 전체보기 / 개별선박 선택 탭 구성
+    tab_all, tab_single = st.tabs(["📋 전체선박 목록 보기", "🔍 개별선박 선택 보기"])
 
-            st.markdown("---")
-            if st.button(f"🤖 [{v['vssl_nm']}] 선종 기준 AI 대응가이드 생성", key=f"btn_vssl_{port_code}_{de_gb}_{idx}", use_container_width=True):
-                mapped_info = map_search_query_with_gemini(v['vssl_knd'])
-                st.session_state['active_chem'] = mapped_info.get("chem_ko", v['vssl_knd'])
-                st.session_state['active_unno'] = mapped_info.get("unno", "0000")
-                st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
-                st.session_state['active_ship'] = f"[{port_name} {gb_title}] {v['vssl_nm']} ({v['vssl_knd']})"
-                st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
-                st.session_state['active_summary'] = ""
-                st.session_state['active_key_changed'] = True
-                st.rerun()
+    with tab_all:
+        for idx, v in enumerate(vessels):
+            render_vessel_item_card(v, port_name, port_code, de_gb, f"all_{idx}")
+
+    with tab_single:
+        # 드롭다운 선택용 라벨 리스트 생성
+        vessel_options = [f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} | 선종: {v['vssl_knd_nm']} | 계선장소: {v['laidup_fclty_nm']}" for v in vessels]
+        selected_idx = st.selectbox("모니터링할 선박을 선택하세요:", range(len(vessel_options)), format_func=lambda x: vessel_options[x], key=f"select_{port_code}_{de_gb}")
+        
+        if selected_idx is not None:
+            selected_vessel = vessels[selected_idx]
+            render_vessel_item_card(selected_vessel, port_name, port_code, de_gb, f"single_{selected_idx}")
 
 # ==========================================
 # 5. 메인 화면 구성 (Hero Section & 로고 정렬)
