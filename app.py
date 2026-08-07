@@ -273,47 +273,53 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
 # ==========================================
 
-# 💡 캐시를 일시적으로 끄거나 ttl을 짧게 설정하여 이전 0건 캐시를 방지합니다.
+import time
+
+@st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
-    [해양수산부 선박운항정보 API (VsslEtrynd5)] 디버깅 메시지 포함
+    [해양수산부 선박운항정보 API (VsslEtrynd5)]
+    - 포트미스 DB 쿼리 타임아웃 방지를 위해 날짜 범위를 최근 3일간으로 설정
+    - 연속 호출 시 동시성 제한 방지를 위한 세션 우회
     """
     if not PUBLIC_API_KEY:
-        return [], "PUBLIC_API_KEY 미설정"
+        return []
 
-    # KST 기준 오늘 날짜 구하기
+    # KST 기준 날짜 설정 (당일 단하루 조회 시 포트미스 DB 타임아웃 방지를 위해 최근 3일 설정)
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    today_str = now_kst.strftime("%Y%m%d")
+    ede_str = now_kst.strftime("%Y%m%d")
+    sde_str = (now_kst - timedelta(days=2)).strftime("%Y%m%d")  # 3일간 범위
 
-    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
+    # URL과 params를 완전히 분리하여 requests가 올바르게 인코딩하도록 처리
+    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
+    
     params = {
-        'prtAgCd': port_code,
-        'sde': today_str,
-        'ede': today_str,
-        'deGb': de_gb,
-        'numOfRows': '50',
+        'serviceKey': PUBLIC_API_KEY,
+        'prtAgCd': str(port_code).strip(),
+        'sde': sde_str,
+        'ede': ede_str,
+        'deGb': str(de_gb).strip().upper(),  # 'I' 또는 'O'
+        'numOfRows': '30',
         'pageNo': '1'
     }
 
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/xml, text/xml, */*'
+    }
+
     vessels = []
-    debug_msg = ""
     try:
+        # API 서버 연속 호출 제한(Rate Limit) 방지를 위한 미세 대기
+        time.sleep(0.3)
+        
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=10, verify=False)
-
-        debug_msg = f"URL: {res.url} | Status: {res.status_code}\n"
         
+        res = session.get(url, params=params, headers=headers, timeout=12, verify=False)
+
         if res.status_code == 200 and res.content:
-            raw_xml = res.content.decode('utf-8', errors='ignore')
             root = ET.fromstring(res.content)
-            
-            result_code = root.findtext('.//resultCode', 'NONE')
-            result_msg = root.findtext('.//resultMsg', 'NONE')
-            total_cnt = root.findtext('.//totalCount', '0')
-            
-            debug_msg += f"ResultCode: {result_code} | ResultMsg: {result_msg} | TotalCount: {total_cnt}\n"
-            
             items = root.findall('.//item') or root.findall('body/items/item')
 
             for item in items:
@@ -357,12 +363,10 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                     "prent_prt": prent_prt,
                     "nxpt_prt": nxpt_prt
                 })
-        else:
-            debug_msg += f"HTTP 응답 에러: {res.status_code}"
     except Exception as e:
-        debug_msg += f"예외 발생: {e}"
+        print(f"선박운항정보 API 수집 에러 ({port_code}/{de_gb}): {e}")
 
-    return vessels, debug_msg
+    return vessels
 
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
