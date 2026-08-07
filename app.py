@@ -274,49 +274,53 @@ def fetch_rag_context(query, k=5):
 # ==========================================
 
 import time
+from urllib.parse import unquote
 
 @st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - sde: 어제 날짜 (KST 기준)
-    - ede: 내일 날짜 (KST 기준)
-    - 언패킹 오류 방지를 위해 (vessels, debug_msg) 튜플 반환
+    - serviceKey 이중 인코딩 방지 처리 적용
+    - sde: 어제, ede: 내일 (KST)
     """
     if not PUBLIC_API_KEY:
         return [], "PUBLIC_API_KEY가 설정되지 않았습니다."
 
-    # KST 기준 날짜 계산 (sde: 어제, ede: 내일)
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
     sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")  # 어제
     ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")  # 내일
 
-    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
+    # 💡 [핵심] API 키가 디코딩 키/인코딩 키에 관계없이 일관되게 동작하도록 unquote 처리 후 URL 직접 결합
+    clean_key = unquote(PUBLIC_API_KEY)
+    
+    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={clean_key}"
+    
+    # serviceKey는 URL에 직접 포함했으므로 params에서는 제외
     params = {
         'prtAgCd': str(port_code).strip(),
         'sde': sde_str,
         'ede': ede_str,
-        'deGb': str(de_gb).strip().upper(),  # 'I' 또는 'O'
-        'numOfRows': '50',
+        'deGb': str(de_gb).strip().upper(),
+        'numOfRows': '100',  # 62건 이상 넉넉히 수신하도록 100건 설정
         'pageNo': '1'
     }
 
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/xml, text/xml, */*'
     }
 
     vessels = []
     debug_msg = ""
     try:
-        # 동시 다중 호출 시 포트미스 API 차단 방지를 위한 미세 대기
-        time.sleep(0.3)
+        time.sleep(0.2)  # 연속 요청 제한 방지
         
         session = requests.Session()
         session.verify = False
         
+        # requests.get 실행
         res = session.get(url, params=params, headers=headers, timeout=12, verify=False)
-        debug_msg = f"HTTP Status: {res.status_code} | URL: {res.url}"
+        debug_msg = f"HTTP Status: {res.status_code}"
 
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
