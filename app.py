@@ -633,15 +633,19 @@ def fetch_vessel_spec_api(clsgn, vssl_nm):
     return None
 
 
+# ==========================================
+# 2. 화물반출입 API 연동 (외항/내항 전용 필드 매핑 & HNS 식별)
+# ==========================================
+
 def fetch_cargo_inout_api(port_code, etrypt_year, etrypt_co, clsgn, ibobprt_nm):
     """
     [해양수산부 외항/내항 화물반출입정보 API (CargFrghtOut4 / CargFrghtIn2)]
-    - 내외항구분 우선 순위 교차 스위칭 조회
+    - 지정된 외항/내항 주요 표시 항목 전수 수집
+    - 내항 화물품목명 기반 Gemini HNS 추론 매핑 적용
     """
     if not PUBLIC_API_KEY:
         return [], "미조회"
 
-    # API 엔드포인트 세팅 (외항: CargFrghtOut4, 내항: CargFrghtIn2)
     url_out = f"https://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}"
     url_in = f"https://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}"
     
@@ -656,10 +660,11 @@ def fetch_cargo_inout_api(port_code, etrypt_year, etrypt_co, clsgn, ibobprt_nm):
         'pageNo': '1'
     }
 
-    # 내외항 우선순위 정하기 (기본값: 외항 우선)
     is_inland_first = "내항" in str(ibobprt_nm)
-    search_order = [(url_in, "내항화물") if is_inland_first else (url_out, "외항화물"),
-                    (url_out, "외항화물") if is_inland_first else (url_in, "내항화물")]
+    search_order = [
+        (url_in, "내항화물") if is_inland_first else (url_out, "외항화물"),
+        (url_out, "외항화물") if is_inland_first else (url_in, "내항화물")
+    ]
 
     for target_url, cargo_type in search_order:
         try:
@@ -674,16 +679,66 @@ def fetch_cargo_inout_api(port_code, etrypt_year, etrypt_co, clsgn, ibobprt_nm):
                 if items:
                     cargo_list = []
                     for item in items:
-                        cargo_list.append({
-                            "cargo_type": cargo_type,
-                            "tkinTkoutNm": (item.findtext('tkinTkoutNm') or '-').strip(),
-                            "frghtPrdlstKorNm": (item.findtext('frghtPrdlstKorNm') or item.findtext('frghtPrdlstNm') or '-').strip(),
-                            "frghtClNm": (item.findtext('frghtClNm') or '-').strip(),
-                            "wtTon": (item.findtext('wtTon') or '-').strip(),
-                            "packngKndNm": (item.findtext('packngKndNm') or '-').strip(),
-                            "lnlMthNm": (item.findtext('lnlMthNm') or '-').strip(),
-                            "satmntDt": (item.findtext('satmntDt') or '-').strip().replace('T', ' ')
-                        })
+                        if cargo_type == "외항화물":
+                            # 💡 지정된 외항화물 16개 핵심 항목 추출
+                            unno_val = (item.findtext('unno') or '').strip().zfill(4)
+                            if unno_val == "0000": unno_val = ""
+
+                            cargo_list.append({
+                                "cargo_type": "외항화물",
+                                "laidupFcltyNm": (item.findtext('laidupFcltyNm') or '-').strip(),
+                                "frghtPrdlstCd": (item.findtext('frghtPrdlstCd') or '-').strip(),
+                                "frghtPrdlstKorNm": (item.findtext('frghtPrdlstKorNm') or '-').strip(),
+                                "unno": unno_val,
+                                "frghtClCd": (item.findtext('frghtClCd') or '-').strip(),
+                                "frghtClNm": (item.findtext('frghtClNm') or '-').strip(),
+                                "etryndDt": (item.findtext('etryndDt') or '-').strip().replace('T', ' '),
+                                "ldPrtNm": (item.findtext('ldPrtNm') or '-').strip(),
+                                "satmntDt": (item.findtext('satmntDt') or '-').strip().replace('T', ' '),
+                                "packngKndNm": (item.findtext('packngKndNm') or '-').strip(),
+                                "lnlEntrpsNm": (item.findtext('lnlEntrpsNm') or '-').strip(),
+                                "lnlMthNm": (item.findtext('lnlMthNm') or '-').strip(),
+                                "wtTon": (item.findtext('wtTon') or '-').strip(),
+                                "aprtfEtryptDt": (item.findtext('aprtfEtryptDt') or '-').strip().replace('T', ' '),
+                                "spprnNm": (item.findtext('spprnNm') or '-').strip(),
+                                "contnCo": (item.findtext('contnCo') or '-').strip(),
+                                "dgstYn": "⚠️ 위험물(UN.No)" if unno_val else "일반화물"
+                            })
+                        else:
+                            # 💡 지정된 내항화물 16개 핵심 항목 추출 + HNS 식별 처리
+                            dgst_code = (item.findtext('dgstLdadngYn') or '-').strip()
+                            dgst_str = "⚠️ 위험물 적재" if dgst_code == "1" else "일반/비위험물"
+                            
+                            kor_nm = (item.findtext('frghtPrdlstKorNm') or item.findtext('frghtPrdlstNm') or '-').strip()
+                            eng_nm = (item.findtext('frghtPrdlstEngNm') or '-').strip()
+
+                            # 내항 화물명 기반 Gemini HNS UN.No 역추출
+                            extracted_unno = ""
+                            if kor_nm != '-' or dgst_code == "1":
+                                map_res = map_search_query_with_gemini(kor_nm)
+                                extracted_unno = str(map_res.get("unno", "0000")).zfill(4)
+                                if extracted_unno == "0000": extracted_unno = ""
+
+                            cargo_list.append({
+                                "cargo_type": "내항화물",
+                                "etryndDt": (item.findtext('etryndDt') or '-').strip().replace('T', ' '),
+                                "tkinTkoutNm": (item.findtext('tkinTkoutNm') or '-').strip(),
+                                "laidupFcltyNm": (item.findtext('laidupFcltyNm') or '-').strip(),
+                                "frghtPrdlstCd": (item.findtext('frghtPrdlstCd') or '-').strip(),
+                                "frghtPrdlstKorNm": kor_nm,
+                                "frghtPrdlstEngNm": eng_nm,
+                                "dgstLdadngYn": dgst_str,
+                                "frghtClCd": (item.findtext('frghtClCd') or '-').strip(),
+                                "frghtClNm": (item.findtext('frghtClNm') or '-').strip(),
+                                "lduldPrtNm": (item.findtext('lduldPrtNm') or '-').strip(),
+                                "wtTon": (item.findtext('wtTon') or '-').strip(),
+                                "satmntDt": (item.findtext('satmntDt') or '-').strip().replace('T', ' '),
+                                "packngKndNm": (item.findtext('packngKndNm') or '-').strip(),
+                                "lnlMthNm": (item.findtext('lnlMthNm') or '-').strip(),
+                                "aprtfEtryptDt": (item.findtext('aprtfEtryptDt') or '-').strip().replace('T', ' '),
+                                "lnlEntrpsNm": (item.findtext('lnlEntrpsNm') or '-').strip(),
+                                "unno": extracted_unno
+                            })
                     return cargo_list, cargo_type
         except Exception as e:
             print(f"{cargo_type} 반출입 API 조회 에러: {e}")
@@ -824,9 +879,9 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. 항만별 선박 모니터링 UI 렌더링 함수
+# 4. 모달 팝업 및 UI 렌더링 함수
 # ==========================================
-            
+
 @st.dialog("🚢 선박 제원 및 화물 반출입 상세정보", width="large")
 def show_vessel_detail_dialog(v, port_code):
     """선박 제원 API & 화물 반출입 API 통합 모달 다이얼로그"""
@@ -864,12 +919,69 @@ def show_vessel_detail_dialog(v, port_code):
 
     st.divider()
 
-    # 2. 화물 반출입 정보 표시
-    st.markdown(f"#### 📦 화물 반출입 정보 (구분: `{cargo_type}`)")
+    # 2. 화물 반출입 정보 표시 (외항 / 내항 맞춤 레이아웃)
+    st.markdown(f"#### 📦 화물 반출입 정보 (구분: `{cargo_type}`) - 총 {len(cargo_list)}건")
     if cargo_list:
-        df_cargo = pd.DataFrame(cargo_list)
-        df_cargo.columns = ["구분", "반출입명", "화물품목명", "화물분류", "중량톤", "포장종류", "하역방법", "신고일시"]
-        st.dataframe(df_cargo, use_container_width=True, hide_index=True)
+        for c_idx, c in enumerate(cargo_list):
+            with st.container(border=True):
+                if c["cargo_type"] == "외항화물":
+                    # 💡 외항화물 지정 16개 항목 표시
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.write(f"- **계선장소명:** {c['laidupFcltyNm']}")
+                        st.write(f"- **화물품목코드:** `{c['frghtPrdlstCd']}`")
+                        st.write(f"- **화물품목한글명:** **{c['frghtPrdlstKorNm']}**")
+                        st.write(f"- **UN.No:** `{c['unno'] if c['unno'] else '-'}`")
+                        st.write(f"- **화물분류 (코드/명):** {c['frghtClNm']} (`{c['frghtClCd']}`)")
+                        st.write(f"- **위험물구분:** {c['dgstYn']}")
+                    with c2:
+                        st.write(f"- **입출항일시:** {c['etryndDt']}")
+                        st.write(f"- **적하항구명:** {c['ldPrtNm']}")
+                        st.write(f"- **신고일시:** {c['satmntDt']}")
+                        st.write(f"- **포장종류명:** {c['packngKndNm']}")
+                        st.write(f"- **하역업체명:** {c['lnlEntrpsNm']}")
+                    with c3:
+                        st.write(f"- **하역방법명:** {c['lnlMthNm']}")
+                        st.write(f"- **중량톤:** {c['wtTon']} 톤")
+                        st.write(f"- **기항지입항일시:** {c['aprtfEtryptDt']}")
+                        st.write(f"- **선사명:** {c['spprnNm']}")
+                        st.write(f"- **컨테이너수:** {c['contnCo']} 개")
+                else:
+                    # 💡 내항화물 지정 16개 항목 표시
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.write(f"- **입출항일시:** {c['etryndDt']}")
+                        st.write(f"- **반입반출구분명:** {c['tkinTkoutNm']}")
+                        st.write(f"- **계선장소명:** {c['laidupFcltyNm']}")
+                        st.write(f"- **화물품목코드:** `{c['frghtPrdlstCd']}`")
+                        st.write(f"- **화물품목명:** **{c['frghtPrdlstKorNm']}**")
+                        st.write(f"- **화물품목영문명:** {c['frghtPrdlstEngNm']}")
+                    with c2:
+                        st.write(f"- **위험물적재유무:** {c['dgstLdadngYn']}")
+                        st.write(f"- **화물분류 (코드/명):** {c['frghtClNm']} (`{c['frghtClCd']}`)")
+                        st.write(f"- **양적하항구명:** {c['lduldPrtNm']}")
+                        st.write(f"- **중량톤:** {c['wtTon']} 톤")
+                        st.write(f"- **신고일시:** {c['satmntDt']}")
+                    with c3:
+                        st.write(f"- **포장종류명:** {c['packngKndNm']}")
+                        st.write(f"- **하역방법명:** {c['lnlMthNm']}")
+                        st.write(f"- **기항지입항일시:** {c['aprtfEtryptDt']}")
+                        st.write(f"- **하역업체명:** {c['lnlEntrpsNm']}")
+                        st.write(f"- **추정 UN.No:** `{c['unno'] if c['unno'] else '-'}`")
+
+                # HNS/위험물 발견 시 메인 AI 가이드 생성 버튼 연결
+                target_unno = c.get('unno', '')
+                chem_query = c['frghtPrdlstKorNm']
+                if target_unno or "위험물" in c.get('dgstLdadngYn', '') or c.get('dgstYn') == "⚠️ 위험물(UN.No)":
+                    if st.button(f"🤖 [{chem_query}] HNS AI 비상대응가이드 생성", key=f"btn_cargo_ai_{c_idx}", use_container_width=True):
+                        st.session_state['active_chem'] = chem_query
+                        st.session_state['active_unno'] = target_unno if target_unno else "0000"
+                        st.session_state['active_cas'] = "-"
+                        st.session_state['active_ship'] = f"[{v['vssl_nm']}] 적재화물 ({chem_query})"
+                        st.session_state['active_accident_context'] = f"{c['laidupFcltyNm']} 반출입 화물 사고"
+                        st.session_state['active_summary'] = ""
+                        st.session_state['active_key_changed'] = True
+                        st.rerun()
     else:
         st.info("💡 해당 선박의 화물 반출입 신고 내역이 없습니다.")
 
