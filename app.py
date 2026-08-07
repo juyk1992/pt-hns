@@ -840,9 +840,9 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
 # ==========================================
-# 4. 모달 팝업 및 UI 렌더링 함수
+# 4. 항만별 선박 모니터링 UI 렌더링 함수
 # ==========================================
-
+            
 @st.dialog("🚢 선박 제원 및 화물 반출입 상세정보", width="large")
 def show_vessel_detail_dialog(v, port_code):
     """선박 제원 API & 화물 반출입 API 통합 모달 다이얼로그"""
@@ -932,6 +932,78 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
         # 💡 [요구사항] 버튼 명칭 변경 및 선박제원/화물 정보 팝업 띄우기
         if st.button(f"🔍 [{v['vssl_nm']}] 선박제원 및 화물반출입정보 조회", key=f"btn_spec_{port_code}_{de_gb}_{idx}", use_container_width=True):
             show_vessel_detail_dialog(v, port_code)
+
+def render_vessel_tab_content(port_name, port_code, de_gb):
+    gb_title = "입항" if de_gb == 'I' else "출항"
+    now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
+    today_date = now_kst.date()
+
+    # 💡 1. 검색 기간 기본값: 오늘 ~ 오늘
+    c_date1, c_date2, c_btn = st.columns([0.35, 0.35, 0.3])
+    with c_date1:
+        start_date = st.date_input("조회 시작일", value=today_date, key=f"sdate_{port_code}_{de_gb}")
+    with c_date2:
+        end_date = st.date_input("조회 종료일", value=today_date, key=f"edate_{port_code}_{de_gb}")
+    with c_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        # 💡 "조회" 버튼을 클릭해야만 수신 수행
+        query_trigger = st.button("🔍 조회", key=f"search_btn_{port_code}_{de_gb}", use_container_width=True)
+
+    # 수신 트리거 상태 제어
+    state_key_fetched = f"fetched_{port_code}_{de_gb}"
+    state_key_vessels = f"vessels_{port_code}_{de_gb}"
+
+    if query_trigger:
+        st.cache_data.clear()
+        st.session_state[state_key_fetched] = True
+
+    # 최초 접속 시 자동 조회가 안 되도록 처리
+    if not st.session_state.get(state_key_fetched, False):
+        st.info(f"💡 날짜 설정 후 우측의 **[🔍 조회]** 버튼을 클릭하면 {port_name} {gb_title} 신고 선박 정보가 실시간 연동됩니다.")
+        return
+
+    sde_str = start_date.strftime("%Y%m%d")
+    ede_str = end_date.strftime("%Y%m%d")
+    sde_fmt = start_date.strftime("%Y-%m-%d")
+    ede_fmt = end_date.strftime("%Y-%m-%d")
+
+    st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
+
+    with st.spinner(f"{port_name} {gb_title} 전체 선박 정보 수집 중..."):
+        vessels = fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str)
+
+    if not vessels:
+        st.warning(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없습니다.")
+        return
+
+    st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다.")
+
+    # 💡 2. 단일 셀렉트박스 (전체보기 + 개별선박 선택 목록)
+    ALL_VIEW_OPTION = f"📋 전체선박 목록 보기 (총 {len(vessels)}척)"
+    select_options = [ALL_VIEW_OPTION] + [
+        f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}" 
+        for v in vessels
+    ]
+
+    selected_option = st.selectbox(
+        "선박 필터링 선택 (개별 선박 선택 시 해당 선박만 표시됩니다):",
+        options=select_options,
+        key=f"filter_select_{port_code}_{de_gb}"
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 💡 3. 필터링 조건에 따른 목록 리스트 표출
+    if selected_option == ALL_VIEW_OPTION:
+        # 전체 목록 보기
+        for idx, v in enumerate(vessels):
+            render_vessel_item_card(v, port_name, port_code, de_gb, f"all_{idx}")
+    else:
+        # 선택된 단일 선박만 보기
+        selected_idx = select_options.index(selected_option) - 1
+        if 0 <= selected_idx < len(vessels):
+            selected_vessel = vessels[selected_idx]
+            render_vessel_item_card(selected_vessel, port_name, port_code, de_gb, f"single_{selected_idx}")
 
 # ==========================================
 # 5. 메인 화면 구성 (Hero Section & 로고 정렬)
