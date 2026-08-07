@@ -201,36 +201,30 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
 
 # ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 (스캔 범위를 인덱스 38~221로 안전 확장)
+# 1. 🖼️ PDF 전체 페이지 대상 인덱스 맵 생성 (범위 제한 없음)
 # ==========================================
 
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
     """
-    HNS 정보집 PDF 물리적 인덱스 직접 매핑
-    - 과산화수소 누락 방지를 위해 인덱스 38(물리 39쪽)부터 안전 스캔
+    HNS 정보집 PDF 전체 페이지 대상 전수 스캔 매핑
     """
     if not os.path.exists(pdf_path):
         return []
 
     index_list = []
     with pdfplumber.open(pdf_path) as pdf:
-        # 안전하게 인덱스 38 ~ 220 (물리적 39페이지 ~ 221페이지) 스캔
-        start_idx = 38
-        end_idx = min(221, len(pdf.pages))
-        
-        for idx in range(start_idx, end_idx):
-            page = pdf.pages[idx]
+        # PDF 전체 페이지를 처음부터 끝까지 스캔
+        for idx, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             
             if not text.strip():
                 continue
 
-            # UN번호 추출 정규식 보완 (공백/줄바꿈 유연 처리)
-            unno_match = re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE) or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE)
+            # UN번호 추출 정규식
+            unno_match = re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE) or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE) or re.search(r'(\d{4})', text)
             unno = unno_match.group(1).strip() if unno_match else ""
             
-            # 페이지 줄 단위 파싱
             lines = [line.strip() for line in text.split('\n') if line.strip()]
             title = lines[0] if lines else ""
             
@@ -238,12 +232,12 @@ def build_hns_pdf_index(pdf_path):
             synonyms = synonym_match.group(1).strip() if synonym_match else ""
 
             index_list.append({
-                "page_index": idx,            # 0-based 물리 인덱스 (예: 39)
-                "display_page_no": idx + 1,   # 1-based 물리 페이지 번호 (예: 40페이지)
+                "page_index": idx,            # 0-based 물리 인덱스
+                "display_page_no": idx + 1,   # 1-based 물리 페이지 번호
                 "unno": unno,
                 "title": title,
                 "synonyms": synonyms,
-                "raw_text": text.upper()      # 💡 전체 텍스트 상위 매칭용 보관
+                "raw_text": text.upper()
             })
     return index_list
 
@@ -251,27 +245,33 @@ hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 
 def get_hns_page_image(unno_or_query):
-    """UN번호, 물질명, 유사명 및 전체 텍스트 교차 검색으로 해당 PDF 페이지 렌더링"""
+    """PDF 전체 인덱스에서 UN번호, 물질명, 유사명, 텍스트 포함 여부로 정확한 페이지 렌더링"""
     if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
         return None, None
 
     q = str(unno_or_query).strip().upper()
     target_item = None
 
-    for item in hns_pdf_index:
-        unno = str(item['unno']).strip()
-        title = item['title'].upper()
-        synonyms = item['synonyms'].upper()
-        raw_text = item.get('raw_text', '')
+    # 1차: UN번호 정확 일치 검색
+    if q.isdigit() and len(q) == 4:
+        for item in hns_pdf_index:
+            if item['unno'] == q:
+                target_item = item
+                break
 
-        # 1차: UN번호 또는 제목/유사명 직접 일치
-        if (q and q == unno) or (q in title) or (q in synonyms):
-            target_item = item
-            break
-        # 2차: 페이지 전체 텍스트 내 포함 여부 (과산화수소 등 예외 케이스 방지)
-        elif len(q) >= 2 and q in raw_text:
-            target_item = item
-            break
+    # 2차: 물질명 또는 유사명 포함 검색
+    if not target_item:
+        for item in hns_pdf_index:
+            if q in item['title'].upper() or q in item['synonyms'].upper():
+                target_item = item
+                break
+
+    # 3차: 전체 텍스트 내 포함 검색 (최후의 보루)
+    if not target_item and len(q) >= 2:
+        for item in hns_pdf_index:
+            if q in item['raw_text']:
+                target_item = item
+                break
 
     if target_item is None:
         return None, None
