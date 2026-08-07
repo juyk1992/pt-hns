@@ -244,29 +244,44 @@ def build_hns_pdf_index(pdf_path):
 hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 
-def get_hns_page_image(unno_or_query):
-    """PDF 전체 인덱스에서 UN번호, 물질명, 유사명, 텍스트 포함 여부로 정확한 페이지 렌더링"""
-    if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
+def get_hns_page_image(unno_or_query, cas_no="-"):
+    """
+    [4단계 순차 탐색 방식]
+    1차: UN번호 일치 검색
+    2차: CAS번호 일치 검색
+    3차: 물질명 또는 유사명 포함 검색
+    4차: 페이지 전체 텍스트 내 포함 검색 (최후의 보루)
+    """
+    if not hns_pdf_index or not os.path.exists(HNS_PDF_PATH):
         return None, None
 
     q = str(unno_or_query).strip().upper()
+    q_cas = str(cas_no).strip()
     target_item = None
 
-    # 1차: UN번호 정확 일치 검색
+    # 1차: UN번호로 찾기 (2014, 2015 등 유사 번호 유연 대응)
     if q.isdigit() and len(q) == 4:
         for item in hns_pdf_index:
             if item['unno'] == q:
                 target_item = item
                 break
 
-    # 2차: 물질명 또는 유사명 포함 검색
-    if not target_item:
+    # 2차: CAS번호로 찾기 (-가 아닐 경우)
+    if not target_item and q_cas and q_cas not in ["-", "0000", "없음"]:
+        for item in hns_pdf_index:
+            # 전체 텍스트 혹은 색인 내 CAS번호 포함 여부 확인
+            if q_cas in item.get('raw_text', ''):
+                target_item = item
+                break
+
+    # 3차: 물질명 또는 유사명 매칭
+    if not target_item and q:
         for item in hns_pdf_index:
             if q in item['title'].upper() or q in item['synonyms'].upper():
                 target_item = item
                 break
 
-    # 3차: 전체 텍스트 내 포함 검색 (최후의 보루)
+    # 4차: 전체 텍스트 내 포함 검색 (최후의 보루)
     if not target_item and len(q) >= 2:
         for item in hns_pdf_index:
             if q in item['raw_text']:
@@ -1355,8 +1370,9 @@ if 'active_chem' in st.session_state:
       safety_info = fetch_chem_safety_info(cas)
       kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
 
-      # 1. HNS 정보집 원본 스캔 이미지 1장 렌더링
-      pil_image, page_no = get_hns_page_image(unno if unno != '0000' else chem)
+      # 기존: pil_image, page_no = get_hns_page_image(unno if unno != "0000" else chem)
+      # 변경: CAS번호(cas)를 2차 검색 조건으로 함께 전달
+      pil_image, page_no = get_hns_page_image(unno if unno != "0000" else chem, cas_no=cas)
 
       # 2. RAG 대응가이드 검색 텍스트 + 연관 5개 쪽수 원본 이미지들 렌더링
       rag_search_query = f'{chem} {unno} {accident_ctx} 사고 대응 방제 조치'
