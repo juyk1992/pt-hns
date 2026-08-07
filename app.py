@@ -1,6 +1,5 @@
 import base64
 from datetime import datetime, timedelta, timezone
-import io
 import json
 import os
 import re
@@ -10,7 +9,6 @@ import urllib3
 import xml.etree.ElementTree as ET
 
 from google import genai
-from google.genai import types
 
 # RAG Vector DB 연동 라이브러리
 from langchain_community.vectorstores import Chroma
@@ -45,10 +43,11 @@ if 'keep_alive_started' not in st.session_state:
   t.start()
 
 # ==========================================
-# 0. 로컬 이미지 경로 및 Base64 변환 함수
+# 0. 로컬 이미지 및 PDF 파일 경로 설정
 # ==========================================
 KCG_LOGO_PATH = 'kcg_logo.png'
 HNS_PDF_PATH = '해상운송 위험유해물질 정보집(HNS 정보집)2024.pdf'
+KCG_GUIDE_PDF_PATH = '위험유해물질(HNS) 해양사고 대응 가이드.pdf'
 
 
 @st.cache_data
@@ -206,42 +205,41 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 # ==========================================
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
-    """PDF 전체 페이지를 스캔하여 UN번호, 물질명, 페이지 번호를 맵핑"""
-    if not os.path.exists(pdf_path):
-        return []
+  """PDF 전체 페이지를 스캔하여 UN번호, 물질명, 페이지 번호를 맵핑"""
+  if not os.path.exists(pdf_path):
+    return []
 
-    index_list = []
-    with pdfplumber.open(pdf_path) as pdf:
-        # 34페이지(인덱스 33)부터 215페이지(인덱스 214) 물질 영역 스캔
-        for idx in range(33, min(215, len(pdf.pages))):
-            page = pdf.pages[idx]
-            text = page.extract_text() or ""
-            
-            unno_match = re.search(r'UN번호\s*(\d{4})', text)
-            unno = unno_match.group(1).strip() if unno_match else ""
-            
-            # 💡 [원인 수정]: 'l' 변수명 오타를 'line'으로 정상 수정
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
-            title = lines[0] if lines else ""
-            
-            synonym_match = re.search(r'유사명\s*([^\n]+)', text)
-            synonyms = synonym_match.group(1).strip() if synonym_match else ""
-            
-            index_list.append({
-                "page_index": idx,       # 0-based index
-                "page_no": idx + 1,       # 1-based page number
-                "unno": unno,
-                "title": title,
-                "synonyms": synonyms
-            })
-    return index_list
+  index_list = []
+  with pdfplumber.open(pdf_path) as pdf:
+    # 34페이지(인덱스 33)부터 215페이지(인덱스 214) 물질 영역 스캔
+    for idx in range(33, min(215, len(pdf.pages))):
+      page = pdf.pages[idx]
+      text = page.extract_text() or ''
+
+      unno_match = re.search(r'UN번호\s*(\d{4})', text)
+      unno = unno_match.group(1).strip() if unno_match else ''
+
+      lines = [line.strip() for line in text.split('\n') if line.strip()]
+      title = lines[0] if lines else ''
+
+      synonym_match = re.search(r'유사명\s*([^\n]+)', text)
+      synonyms = synonym_match.group(1).strip() if synonym_match else ''
+
+      index_list.append({
+          'page_index': idx,  # 0-based index
+          'page_no': idx + 1,  # 1-based page number
+          'unno': unno,
+          'title': title,
+          'synonyms': synonyms,
+      })
+  return index_list
 
 
 hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 
 def get_hns_page_image(unno_or_query):
-  """UN번호 또는 물질명으로 PDF 페이지를 찾아 300DPI 고화질 PIL 이미지로 렌더링"""
+  """UN번호 또는 물질명으로 HNS 정보집 PDF 페이지를 찾아 300DPI PIL 이미지로 렌더링"""
   if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
     return None, None
 
@@ -263,12 +261,10 @@ def get_hns_page_image(unno_or_query):
   try:
     with pdfplumber.open(HNS_PDF_PATH) as pdf:
       page = pdf.pages[target_index]
-      # 300 DPI 고해상도 이미지 변환 (Vision 인식률 극대화)
       pix = page.to_image(resolution=300)
-      pil_img = pix.original
-      return pil_img, target_index + 1
+      return pix.original, target_index + 1
   except Exception as e:
-    print(f'PDF 이미지 렌더링 에러: {e}')
+    print(f'HNS 정보집 PDF 이미지 렌더링 에러: {e}')
     return None, None
 
 
@@ -294,20 +290,38 @@ def load_kcg_vectorstore():
 kcg_vectorstore = load_kcg_vectorstore()
 
 
-def fetch_rag_context(query, k=5):
+def fetch_rag_context_and_images(query, k=5):
+  """RAG 검색 결과 텍스트와 함께 해당 페이지의 고화질 이미지 리스트를 반환"""
   if not kcg_vectorstore or not query:
-    return 'RAG 가이드 데이터베이스 미생성'
+    return 'RAG 가이드 데이터베이스 미생성', []
+
   try:
     docs = kcg_vectorstore.similarity_search(query, k=k)
     if not docs:
-      return '관련 가이드 지침 검색 결과 없음'
+      return '관련 가이드 지침 검색 결과 없음', []
+
     context_items = []
+    page_numbers = []
+
     for doc in docs:
-      page = doc.metadata.get('page', 0) + 1
-      context_items.append(f'[대응가이드 {page}쪽 지침]\n{doc.page_content}')
-    return '\n\n'.join(context_items)
+      page_no = doc.metadata.get('page', 0) + 1
+      if page_no not in page_numbers:
+        page_numbers.append(page_no)
+      context_items.append(f'[대응가이드 {page_no}쪽 지침]\n{doc.page_content}')
+
+    # 🖼️ 해당 쪽수들을 대응가이드 PDF에서 고화질 이미지로 렌더링
+    rag_images = []
+    if os.path.exists(KCG_GUIDE_PDF_PATH):
+      with pdfplumber.open(KCG_GUIDE_PDF_PATH) as pdf:
+        for p_no in page_numbers:
+          if 0 <= p_no - 1 < len(pdf.pages):
+            page = pdf.pages[p_no - 1]
+            pix = page.to_image(resolution=200)
+            rag_images.append({'page_no': p_no, 'pil_img': pix.original})
+
+    return '\n\n'.join(context_items), rag_images
   except Exception as e:
-    return f'RAG 검색 오류: {e}'
+    return f'RAG 검색 오류: {e}', []
 
 
 # ==========================================
@@ -845,50 +859,56 @@ def generate_gemini_vision_summary(
     rag_text,
     hns_pil_image=None,
     hns_page_no=None,
+    rag_images=[],
     accident_context='',
 ):
-  """해당 HNS 정보집 PDF 고화질 이미지(Vision) + API + RAG 멀티모달 종합 생성"""
+  """[멀티모달 Gemini Vision 통합 생성] - HNS 정보집 스캔 이미지 1장 + RAG 대응가이드 스캔 이미지 N장 동시 전달"""
   if not GEMINI_API_KEY:
     return '⚠️ Gemini API 키가 설정되지 않았습니다.'
 
   try:
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    rag_context = f'[위험유해물질(HNS) 해양사고 대응 가이드 PDF RAG 검색 결과]\n{rag_text}\n'
     accident_info = (
         f'\n🚨 [현장 사고 상황 조건]: {accident_context}\n'
         if accident_context
         else ''
     )
+
     hns_img_prompt = (
-        f'\n[첨부 이미지 설명]: 해양경찰청 HNS 정보집 원본 {hns_page_no}쪽 스캔'
+        f'\n- [첨부 이미지 1]: 해경 HNS 정보집 {hns_page_no}쪽 스캔'
         ' 이미지입니다. 표와 세로 쓰기, 픽토그램 수치(NFPA 등)를 이미지에서 직접'
         ' 판독하여 반영하세요.\n'
         if (hns_pil_image and hns_page_no)
         else ''
     )
 
+    rag_img_prompt = ''
+    if rag_images:
+      rag_pages_str = ', '.join([f"{img['page_no']}쪽" for img in rag_images])
+      rag_img_prompt = (
+          '\n- [첨부 이미지 추가]: 해경 HNS 대응가이드'
+          f' ({rag_pages_str}) 스캔 이미지들입니다.\n'
+      )
+
     prompt_text = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실 관제관입니다.
-        첨부된 [해양경찰청 HNS 정보집 원본 스캔 이미지]와 수집된 다중 데이터(공공 API, 해경 대응가이드 RAG)를 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
+        첨부된 [HNS 정보집 스캔 이미지] 및 [HNS 해양사고 대응가이드 스캔 이미지들], 그리고 수집된 공공 API 데이터들을 종합 분석하여, 관제관이 현장 세력(OSC, 함정, 구조대 등)에 바로 지시/전파할 수 있는 비상대응 가이드를 작성하세요.
 
         {accident_info}
         {hns_img_prompt}
-        {rag_context}
+        {rag_img_prompt}
 
         [해양수산부 위험물정보 API 수집 데이터]
         - 물질명: {chem_name} (UN NO: {unno})
         - IMDG 명칭: {dgst_info.get('imdgNm')} ({dgst_info.get('imdgEngNm')})
         - IMDG 등급코드 / 종류명: {dgst_info.get('imdgGradCd', '-')} / {dgst_info.get('kndNm', '-')}
-        - 종류품목명: {dgst_info.get('kndPrdlstNm', '-')}
         - 비상조치코드(EmS): {dgst_info.get('emergManagtCd', '-')}
-        - 선박 적재방법: {dgst_info.get('ldadngMth', '-')}
         - 주의사항: {dgst_info.get('catinMatter', '-')}
 
         [화학물질안전원 안전관리정보 API 수집 데이터 (CAS NO: {cas_no})]
         - 일반 증상 및 표적장기: {safety_info.get('symptom', '-')}
         - 흡입/피부/안구/경구 영향: {safety_info.get('inhale', '-')}, {safety_info.get('skin', '-')}, {safety_info.get('eyeball', '-')}, {safety_info.get('oral', '-')}
-        - 기타 유의사항: {safety_info.get('etc', '-')}
 
         [안전보건공단 MSDS 1~16번 종합 수집 데이터]
         {kosha_msds_text}
@@ -896,10 +916,10 @@ def generate_gemini_vision_summary(
         [상황실 지침 반영 엄격 작성 규칙]
         1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
         2. [수치 및 안전 기준]: 
-           - 이격거리 및 보호구 등 핵심 수치는 첨부된 HNS 정보집 원본 이미지 및 해경 HNS 대응가이드(RAG) 수치를 최우선 반영하세요.
+           - 이격거리 및 보호구 등 핵심 수치는 첨부된 HNS 대응가이드 및 정보집 원본 이미지상의 수치를 최우선 반영하세요.
            - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
            - 물 반응성 물질 확인 시 직사주수 절대 금지를 명시하세요.
-        3. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우(화재·폭발, 유출, 충돌·침수, 좌초 등), 해당 사고 유형별 비상조치 지침을 최우선 포함하세요.
+        3. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우 해당 사고 유형별 비상조치 지침을 최우선 포함하세요.
 
         --- 출력 형식을 엄격히 준수하세요 (항목 간 반드시 엔터로 줄바꿈) ---
 
@@ -917,10 +937,13 @@ def generate_gemini_vision_summary(
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
-    # 이미지 멀티모달 입력 구성
+    # 🖼️ 멀티모달 입력 구성 (텍스트 + HNS정보집 이미지 1장 + RAG 대응가이드 이미지 N장)
     contents_input = [prompt_text]
     if hns_pil_image:
       contents_input.append(hns_pil_image)
+
+    for r_img in rag_images:
+      contents_input.append(r_img['pil_img'])
 
     for model_id in [
         'gemini-3.6-flash',
@@ -1307,18 +1330,21 @@ if 'active_chem' in st.session_state:
       or not st.session_state['active_summary']
   ):
     with st.spinner(
-        'HNS 정보집 PDF 고화질 렌더링 + 공공 API + RAG + Gemini Vision 종합'
+        'HNS 정보집 PDF + 대응가이드 PDF 이미지 렌더링 및 Gemini Vision 종합'
         ' 분석 중...'
     ):
       dgst_info = fetch_dgst_info(unno)
       safety_info = fetch_chem_safety_info(cas)
       kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
 
-      # 🖼️ PDF에서 해당 물질 페이지 고화질 이미지 렌더링
+      # 1. HNS 정보집 원본 스캔 이미지 1장 렌더링
       pil_image, page_no = get_hns_page_image(unno if unno != '0000' else chem)
 
+      # 2. RAG 대응가이드 검색 텍스트 + 연관 5개 쪽수 원본 이미지들 렌더링
       rag_search_query = f'{chem} {unno} {accident_ctx} 사고 대응 방제 조치'
-      rag_text = fetch_rag_context(rag_search_query)
+      rag_text, rag_images = fetch_rag_context_and_images(
+          rag_search_query, k=5
+      )
 
       st.session_state['active_source_data'] = {
           'dgst': dgst_info,
@@ -1326,6 +1352,7 @@ if 'active_chem' in st.session_state:
           'hns_image': pil_image,
           'hns_page_no': page_no,
           'rag_text': rag_text,
+          'rag_images': rag_images,  # RAG 원본 스캔 이미지 세트 보관
           'kosha': kosha_msds_text,
       }
 
@@ -1339,6 +1366,7 @@ if 'active_chem' in st.session_state:
           rag_text,
           hns_pil_image=pil_image,
           hns_page_no=page_no,
+          rag_images=rag_images,
           accident_context=accident_ctx,
       )
       st.session_state['active_key_changed'] = False
@@ -1365,7 +1393,8 @@ if 'active_chem' in st.session_state:
         st.markdown('**[해양수산부 위험물정보 API]**')
         d = src.get('dgst', {})
         st.write(
-            f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm',"" '-')})"
+            f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm',"
+            " '-')})"
         )
         st.write(
             f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} /"
@@ -1404,13 +1433,18 @@ if 'active_chem' in st.session_state:
           )
 
       with t4:
-        st.markdown('**[해양경찰청 HNS 해양사고 대응 가이드]**')
-        st.text_area(
-            '대응 가이드 Vector DB',
-            value=src.get('rag_text', ''),
-            height=200,
-            disabled=True,
-        )
+        st.markdown('**[해양경찰청 HNS 해양사고 대응 가이드 원본 스캔]**')
+        rag_imgs = src.get('rag_images', [])
+        if rag_imgs:
+          for r_item in rag_imgs:
+            st.caption(
+                f"📖 위험유해물질(HNS) 해양사고 대응 가이드 **{r_item['page_no']}쪽**"
+                ' 원본 페이지'
+            )
+            st.image(r_item['pil_img'], use_container_width=True)
+            st.divider()
+        else:
+          st.info('💡 연관 대응가이드 원본 스캔 페이지가 없습니다.')
 
       with t5:
         st.markdown('**[안전보건공단 MSDS API]**')
