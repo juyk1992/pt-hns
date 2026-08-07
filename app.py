@@ -273,40 +273,31 @@ def fetch_rag_context(query, k=5):
 # 2. 공공 API 연동 모듈 (HTTPS 및 SSL 세션 적용)
 # ==========================================
 
-from urllib.parse import unquote
 import xml.etree.ElementTree as ET
 import requests
 from datetime import datetime, timezone, timedelta
 import streamlit as st
+import time
 
-@st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
-    [선박운항정보 API (VsslEtrynd5)] 명세서 완벽 준수 파서
-    - 필수 파라미터: prtAgCd, sde, ede (포맷: YYYYMMDD)
-    - 중첩 태그 구조: item -> details -> detail 파싱 보완
+    [선박운항정보 API (VsslEtrynd5)] RAW 응답 진단용 코드
     """
     if not PUBLIC_API_KEY:
-        return [], "PUBLIC_API_KEY 미설정"
+        return [], "PUBLIC_API_KEY 미설정", ""
 
-    # 💡 1. 디코딩/인코딩 키 변환 안전 처리 (params에 넘기기 위해 unquote 수행)
-    clean_service_key = unquote(PUBLIC_API_KEY)
-
-    # 💡 2. KST 기준 날짜 생성 (명세서 규격: YYYYMMDD 8자리)
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
-    sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")  # 어제
-    ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")  # 내일
+    sde_str = (now_kst - timedelta(days=1)).strftime("%Y%m%d")
+    ede_str = (now_kst + timedelta(days=1)).strftime("%Y%m%d")
 
-    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
+    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     
-    # 💡 3. 명세서 필수(1)/옵션(0) 파라미터 정확 구성
     params = {
-        'serviceKey': clean_service_key,
-        'prtAgCd': str(port_code).strip().zfill(3),  # 항만청코드 3자리 (예: 031, 300)
-        'sde': sde_str,                              # 검색 시작일 (8자리)
-        'ede': ede_str,                              # 검색 종료일 (8자리)
-        'deGb': str(de_gb).strip().upper(),          # I: 입항일기준, O: 출항일기준
-        'numOfRows': '100',                          # 한 페이지 결과 수 (최대 100)
+        'prtAgCd': str(port_code).strip(),
+        'sde': sde_str,
+        'ede': ede_str,
+        'deGb': str(de_gb).strip().upper(),
+        'numOfRows': '50',
         'pageNo': '1'
     }
 
@@ -317,24 +308,26 @@ def fetch_vessel_schedule_api(port_code, de_gb):
 
     vessels = []
     debug_msg = ""
+    raw_xml_sample = ""
     
     try:
         session = requests.Session()
         session.verify = False
         
-        res = session.get(url, params=params, headers=headers, timeout=12)
-        debug_msg = f"HTTP Status: {res.status_code}"
+        res = session.get(url, params=params, headers=headers, timeout=10)
+        debug_msg = f"HTTP Status: {res.status_code} | Request URL: {res.url}"
 
         if res.status_code == 200 and res.content:
+            raw_xml_sample = res.text[:1000] # 상위 1000자 원문 확보
             root = ET.fromstring(res.content)
             
             result_code = root.findtext('.//resultCode', 'NONE')
             result_msg = root.findtext('.//resultMsg', 'NONE')
             total_cnt = root.findtext('.//totalCount', '0')
-            debug_msg += f" | Code: {result_code} ({result_msg}) | TotalCount: {total_cnt}"
+            debug_msg += f"\nResultCode: {result_code} ({result_msg}) | TotalCount: {total_cnt}"
 
-            # 💡 4. <item> 목록 탐색
             items = root.findall('.//item') or root.findall('body/items/item')
+            debug_msg += f" | Extracted <item> count: {len(items)}"
 
             for item in items:
                 vssl_nm = (item.findtext('vsslNm') or '-').strip()
@@ -342,14 +335,13 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                 vssl_nlty = (item.findtext('vsslNltyNm') or '-').strip()
                 vssl_knd = (item.findtext('vsslKndNm') or '-').strip()
                 
-                # <details> 하위의 <detail> 계선/일시 정보 다중 추출 처리
-                detail_node = item.find('.//detail') or item.find('details/detail')
-                
+                # <details> 계층 파싱 처리
                 facility_nm = '-'
                 etrypt_dt = '-'
                 tkoff_dt = '-'
                 smit_nm = '-'
                 
+                detail_node = item.find('.//detail') or item.find('details/detail')
                 if detail_node is not None:
                     facility_nm = (detail_node.findtext('laidupFcltyNm') or '-').strip()
                     etrypt_dt = (detail_node.findtext('etryptDt') or '-').strip()
@@ -370,17 +362,13 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                     "smit_nm": smit_nm,
                     "etrypt_yr": (item.findtext('etryptYear') or '-').strip(),
                     "etrypt_co": (item.findtext('etryptCo') or '-').strip(),
-                    "grgt": "-",
-                    "facility_cd": "-",
-                    "facility_sub_cd": "-",
-                    "aprv_dt": "-",
-                    "prent_prt": "-",
-                    "nxpt_prt": "-"
+                    "grgt": "-", "facility_cd": "-", "facility_sub_cd": "-",
+                    "aprv_dt": "-", "prent_prt": "-", "nxpt_prt": "-"
                 })
     except Exception as e:
-        debug_msg = f"수집 에러: {e}"
+        debug_msg += f"\n예외 발생: {e}"
 
-    return vessels, debug_msg
+    return vessels, debug_msg, raw_xml_sample
 
 def fetch_dgst_info(unno):
     """[해양수산부 위험물정보 API]"""
@@ -679,53 +667,25 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
 
     st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
     
-    with st.spinner(f"{port_name} {gb_title} 선박 정보 수집 중..."):
-        vessels, debug_msg = fetch_vessel_schedule_api(port_code, de_gb)
+    vessels, debug_msg, raw_xml_sample = fetch_vessel_schedule_api(port_code, de_gb)
+
+    # 🔬 실시간 진단 로그 표시
+    with st.expander(f"🔬 [{port_name} {gb_title}] 서버 응답 진단 로그 (펼치기)", expanded=True):
+        st.code(debug_msg)
+        if raw_xml_sample:
+            st.markdown("**수신된 XML 응답 원문 샘플:**")
+            st.code(raw_xml_sample, language="xml")
 
     if not vessels:
         st.info(f"💡 해당 기간({sde_fmt} ~ {ede_fmt}) {port_name} {gb_title} 신고 선박 정보가 없거나 API 수집 대기 중입니다.")
         return
 
-    st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다. 선박 항목을 클릭하면 전체 상세 정보가 표출됩니다.")
+    st.success(f"✅ 총 **{len(vessels)}** 척의 {gb_title} 신고 선박이 수집되었습니다.")
 
     for idx, v in enumerate(vessels):
         expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd']} ｜ 계선장소: {v['facility_nm']}"
         with st.expander(expander_label):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown("**[선박 기본 정보]**")
-                st.write(f"- **선명 (한/영):** {v['vssl_nm']}")
-                st.write(f"- **호출부호 (CallSign):** `{v['clsgn']}`")
-                st.write(f"- **선박 국적:** {v['vssl_nlty']}")
-                st.write(f"- **선종:** {v['vssl_knd']}")
-                st.write(f"- **총톤수:** {v['grgt']} 톤")
-            
-            with col2:
-                st.markdown("**[입출항 관제 정보]**")
-                st.write(f"- **입항연도 / 횟수:** {v['etrypt_yr']}년 / {v['etrypt_co']}회")
-                st.write(f"- **신고구분:** {v['smit_nm']}")
-                st.write(f"- **입항일시:** {v['etrypt_dt']}")
-                st.write(f"- **출항일시:** {v['tkoff_dt']}")
-                st.write(f"- **승인일시:** {v['aprv_dt']}")
-
-            with col3:
-                st.markdown("**[부두 및 항로 정보]**")
-                st.write(f"- **계선장소명:** {v['facility_nm']}")
-                st.write(f"- **계선장소 코드/번지:** `{v['facility_cd']}` - `{v['facility_sub_cd']}`")
-                st.write(f"- **전항지 코드:** {v['prent_prt']}")
-                st.write(f"- **차항지 코드:** {v['nxpt_prt']}")
-
-            st.markdown("---")
-            if st.button(f"🤖 [{v['vssl_nm']}] 선종 기준 AI 대응가이드 생성", key=f"btn_vssl_{port_code}_{de_gb}_{idx}", use_container_width=True):
-                mapped_info = map_search_query_with_gemini(v['vssl_knd'])
-                st.session_state['active_chem'] = mapped_info.get("chem_ko", v['vssl_knd'])
-                st.session_state['active_unno'] = mapped_info.get("unno", "0000")
-                st.session_state['active_cas'] = mapped_info.get("cas_no", "-")
-                st.session_state['active_ship'] = f"[{port_name} {gb_title}] {v['vssl_nm']} ({v['vssl_knd']})"
-                st.session_state['active_accident_context'] = mapped_info.get("accident_context", "")
-                st.session_state['active_summary'] = ""
-                st.session_state['active_key_changed'] = True
-                st.rerun()
+            st.write(f"- 선명: {v['vssl_nm']} | 국적: {v['vssl_nlty']} | 입항일시: {v['etrypt_dt']}")
 
 # ==========================================
 # 5. 메인 화면 구성 (Hero Section & 로고 정렬)
