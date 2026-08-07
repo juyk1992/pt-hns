@@ -201,21 +201,25 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
 
 # ==========================================
-# 1. 🖼️ PDF 전체 페이지 대상 인덱스 맵 생성 (범위 제한 없음)
+# 1. 🖼️ PDF 인덱스 맵 생성 (본문 물리 페이지 38~222 범위로 색인 제외)
 # ==========================================
 
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
     """
-    HNS 정보집 PDF 전체 페이지 대상 전수 스캔 매핑
+    HNS 정보집 PDF 본문 영역(물리 페이지 38~222)만 타겟팅하여 색인 페이지 제외
     """
     if not os.path.exists(pdf_path):
         return []
 
     index_list = []
     with pdfplumber.open(pdf_path) as pdf:
-        # PDF 전체 페이지를 처음부터 끝까지 스캔
-        for idx, page in enumerate(pdf.pages):
+        # 1~38페이지의 '물질 색인' 구역을 완전히 제외하고 본문 영역(38~222)만 탐색
+        start_idx = 38  # 물리 39페이지 (0-based)
+        end_idx = min(223, len(pdf.pages))  # 물리 223페이지까지 안전 커버
+        
+        for idx in range(start_idx, end_idx):
+            page = pdf.pages[idx]
             text = page.extract_text() or ""
             
             if not text.strip():
@@ -246,11 +250,11 @@ hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 def get_hns_page_image(unno_or_query, cas_no="-"):
     """
-    [4단계 순차 탐색 방식]
+    [본문 영역 내 4단계 순차 탐색 방식]
     1차: UN번호 일치 검색
     2차: CAS번호 일치 검색
     3차: 물질명 또는 유사명 포함 검색
-    4차: 페이지 전체 텍스트 내 포함 검색 (최후의 보루)
+    4차: 페이지 전체 텍스트 내 포함 검색
     """
     if not hns_pdf_index or not os.path.exists(HNS_PDF_PATH):
         return None, None
@@ -259,17 +263,16 @@ def get_hns_page_image(unno_or_query, cas_no="-"):
     q_cas = str(cas_no).strip()
     target_item = None
 
-    # 1차: UN번호로 찾기 (2014, 2015 등 유사 번호 유연 대응)
+    # 1차: UN번호로 본문 내에서 찾기
     if q.isdigit() and len(q) == 4:
         for item in hns_pdf_index:
             if item['unno'] == q:
                 target_item = item
                 break
 
-    # 2차: CAS번호로 찾기 (-가 아닐 경우)
+    # 2차: CAS번호로 본문 내에서 찾기
     if not target_item and q_cas and q_cas not in ["-", "0000", "없음"]:
         for item in hns_pdf_index:
-            # 전체 텍스트 혹은 색인 내 CAS번호 포함 여부 확인
             if q_cas in item.get('raw_text', ''):
                 target_item = item
                 break
