@@ -277,9 +277,7 @@ def fetch_rag_context(query, k=5):
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - port_code: '031' (평택항), '300' (대산항)
-    - de_gb: 'I' (입항일자 기준), 'O' (출항일자 기준)
-    - 오늘 날짜(KST) 기준으로 자동 수집
+    - 테스트 코드와 동일한 URL 구성 방식 적용 (이중 인코딩 방지)
     """
     if not PUBLIC_API_KEY:
         return []
@@ -288,6 +286,7 @@ def fetch_vessel_schedule_api(port_code, de_gb):
     now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
     today_str = now_kst.strftime("%Y%m%d")
 
+    # 💡 [핵심 수정] URL 문자열에 serviceKey를 직접 삽입하여 params 인코딩 변형 방지
     url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
         'prtAgCd': port_code,
@@ -302,7 +301,7 @@ def fetch_vessel_schedule_api(port_code, de_gb):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=10, verify=false)
+        res = session.get(url, params=params, timeout=10, verify=False)
 
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
