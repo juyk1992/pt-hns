@@ -888,7 +888,7 @@ def map_search_query_with_gemini(query_text):
 def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_text, hns_pil_image=None, hns_page_no=None, rag_images=[], accident_context=""):
     """
     [끝판왕 멀티모달 Gemini Vision 통합 생성]
-    - HNS 정보집 스캔 이미지 1장 + RAG 대응가이드 스캔 이미지 N장 + X,Y,Z류 오염범주 및 다중 API 종합 분석
+    - 공문서 서식(수신, 발신 등) 제거 및 핵심 요약부터 즉시 출력되도록 개선
     """
     if not GEMINI_API_KEY:
         return "⚠️ Gemini API 키가 설정되지 않았습니다."
@@ -907,7 +907,7 @@ def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_in
 
         prompt_text = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실의 최고 수석 관제관입니다.
-        첨부된 [HNS 정보집 원본 스캔 이미지]와 [해양사고 대응 가이드 원본 스캔 이미지들], 그리고 수집된 다중 데이터(공공 API, MSDS, RAG 텍스트)를 철저히 교차 분석하여, 현장 세력(OSC, 경비함정, 특수구조대 등)에 즉각 하달할 수 있는 가장 전문적이고 완벽한 **비상대응 지시서(끝판왕 가이드)**를 작성하세요.
+        첨부된 [HNS 정보집 원본 스캔 이미지]와 [해양사고 대응 가이드 원본 스캔 이미지들], 그리고 수집된 다중 데이터(공공 API, MSDS, RAG 텍스트)를 철저히 교차 분석하여, 현장 세력(OSC, 경비함정, 특수구조대 등)에 즉각 하달할 수 있는 가장 전문적이고 완벽한 **비상대응 지시서**를 작성하세요.
 
         {accident_info}
         {hns_img_prompt}
@@ -937,15 +937,13 @@ def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_in
         - 기타물질 / 잠정평가물질: 위해가 없거나 잠정 평가된 물질
         (※ 첨부된 정보집 이미지상의 운송방법/유해액체물질 분류(X,Y,Z류) 및 해상 거동 특성을 식별하여 방제 조치에 반드시 반영하세요.)
 
-        [상황실 지침 반영 엄격 작성 규칙]
-        1. [초동대응 핵심요약]: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
-        2. [수치 및 안전 기준]: 
-           - 초기이격거리, 대피거리, 보호구 등 핵심 수치는 첨부된 원본 이미지 및 가이드(RAG) 수치를 최우선 반영하세요.
-           - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
-           - 물 반응성 물질 확인 시 직사주수 절대 금지 및 분무(안개) 주수를 명시하세요.
-        3. [사고 상황 맞춤 지침]: [현장 사고 상황 조건]이 존재할 경우 해당 사고 유형별 비상조치 지침을 최우선 포함하세요.
+        [작성 엄격 규칙]
+        1. **공문서 서식(수신, 발신, 일시, 제목 등)을 절대 생성하지 마세요.** 출력은 반드시 `### 🚨 [초동대응 핵심요약]` 제목부터 곧바로 시작해야 합니다.
+        2. 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 실행 위주의 명확한 개조식 문장으로 작성하세요.
+        3. 초기이격거리, 대피거리, 보호구 등 핵심 수치는 첨부된 원본 이미지 및 가이드(RAG) 수치를 최우선 반영하세요.
+        4. 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하고, 물 반응성 물질 확인 시 직사주수 절대 금지 및 분무(안개) 주수를 명시하세요.
 
-        --- 출력 형식을 엄격히 준수하세요 (항목 간 반드시 엔터로 줄바꿈) ---
+        --- 출력 형식을 엄격히 준수하세요 (수신/발신 헤더 일체 금지) ---
 
         ### 🚨 [초동대응 핵심요약]
 
@@ -961,23 +959,23 @@ def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_in
         ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
-        # 멀티모달 입력 (텍스트 + 정보집 이미지 + RAG 가이드 이미지들)
-        contents_input = [prompt_text]
-        if hns_pil_image:
-            contents_input.append(hns_pil_image)
-            
-        for r_img in rag_images:
-            contents_input.append(r_img['pil_img'])
+    # 멀티모달 입력 구성
+    contents_input = [prompt_text]
+    if hns_pil_image:
+        contents_input.append(hns_pil_image)
+        
+    for r_img in rag_images:
+        contents_input.append(r_img['pil_img'])
 
-        for model_id in ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']:
-            try:
-                response = client.models.generate_content(model=model_id, contents=contents_input)
-                return response.text
-            except Exception as ex:
-                print(f"{model_id} Vision 처리 시도 실패: {ex}")
-                continue
+    for model_id in ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']:
+        try:
+            response = client.models.generate_content(model=model_id, contents=contents_input)
+            return response.text
+        except Exception as ex:
+            print(f"{model_id} Vision 처리 시도 실패: {ex}")
+            continue
 
-        return "⚠️ Gemini API 호출에 실패했습니다."
+    return "⚠️ Gemini API 호출에 실패했습니다."
     except Exception as e:
         return f"Gemini API 클라이언트 생성 오류: {e}"
 
@@ -1337,10 +1335,8 @@ if 'active_chem' in st.session_state:
   st.error(status_header)
 
   st.caption(
-      '⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS'
-      ' 정보집, HNS 대응가이드를 통합한 Gemini RAG'
-      ' 모델로 AI 환각 현상을 최소화했습니다.'
-  )
+        "⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS 정보집, HNS 대응가이드를 통합한 Gemini RAG(검색증강생성) 모델로 AI 환각 현상을 최소화했습니다. **단, 현장 상황은 가이드와 다를 수 있으므로 반드시 재확인하시기 바랍니다.**"
+    )
 
   if (
       'active_summary' not in st.session_state
