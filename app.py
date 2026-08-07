@@ -582,7 +582,7 @@ def fetch_chem_safety_info(cas_no):
 def fetch_kosha_msds_info(chem_name, cas_no, unno):
   base_url = 'https://msds.kosha.or.kr/openapi/service/msdschem'
   chem_id = None
-  search_trials = [(unno, '2'), (cas_no, '1'), (chem_name, '0')]
+  search_trials = [(cas_no, '1'), (unno, '2'), (chem_name, '0')]
 
   for search_wrd, search_cnd in search_trials:
     if not search_wrd or str(search_wrd).strip() in [
