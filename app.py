@@ -297,7 +297,8 @@ def fetch_rag_context(query, k=5):
 def fetch_vessel_schedule_api(port_code, de_gb):
     """
     [해양수산부 선박운항정보 API (VsslEtrynd5)]
-    - 50건/100건 제한 우회: totalCount 전체 데이터를 끝까지 자동 수집 (Paging Loop)
+    - numOfRows 규격 한도(50) 준수
+    - 50건 초과 시 pageNo 자동 증가 페이징 루프 적용으로 totalCount 전체 수집
     """
     if not PUBLIC_API_KEY:
         return []
@@ -311,7 +312,7 @@ def fetch_vessel_schedule_api(port_code, de_gb):
 
     vessels = []
     page = 1
-    rows_per_page = 100
+    rows_per_page = 50  # 💡 명세서 규격상 최대값인 50 설정
 
     while True:
         params = {
@@ -372,14 +373,14 @@ def fetch_vessel_schedule_api(port_code, de_gb):
                         "etrypt_co": etrypt_co
                     })
 
-                # 수집된 데이터 수가 전체 개수 이상이면 완료
+                # 💡 현재 수집된 총 개수가 totalCount 이상이거나 더 이상 가져올 항목이 없으면 루프 종료
                 if len(vessels) >= total_cnt or len(items) < rows_per_page:
                     break
                 page += 1
             else:
                 break
         except Exception as e:
-            print(f"선박 API 수집 중 예외 ({port_code}/{de_gb}): {e}")
+            print(f"선박 API 페이징 수집 중 예외 ({port_code}/{de_gb}): {e}")
             break
 
     return vessels
