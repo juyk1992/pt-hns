@@ -6,7 +6,6 @@ import os
 import json
 import base64
 import urllib3
-import time
 from datetime import datetime, timezone, timedelta
 from google import genai
 
@@ -14,7 +13,7 @@ from google import genai
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
-# SSL 경고창 및 검증 비활성화 (공공 API SSL 검증 에러 방지)
+# SSL 경고창 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
@@ -271,28 +270,20 @@ def fetch_rag_context(query, k=5):
         return f"RAG 검색 오류: {e}"
 
 # ==========================================
-# 2. 공공 Open API 연동 모듈 (SSL 에러 방어 적용)
+# 2. 공공 API 연동 모듈 (기존 검증된 통신 구조 일치 적용)
 # ==========================================
-
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def fetch_port_vessels_api(port_code):
-    """[선박운항정보 Open API (VsslEtrynd5)] 세션 재시도 및 타임아웃 대폭 완화"""
+    """[선박운항정보 Open API (VsslEtrynd5)] 실시간 입출항 선박 목록 수집"""
     if not PUBLIC_API_KEY:
         return []
-    
-    port_name_map = {"031": "평택항", "300": "대산항"}
-    port_name = port_name_map.get(port_code, "해당 항만")
-    
+        
     now = datetime.now(timezone.utc) + timedelta(hours=9)
     ede = now.strftime("%Y%m%d")
     sde = (now - timedelta(days=5)).strftime("%Y%m%d")
     
-    url = "https://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
+    url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}"
     params = {
-        'serviceKey': PUBLIC_API_KEY,
         'prtAgCd': port_code,
         'sde': sde,
         'ede': ede,
@@ -301,22 +292,11 @@ def fetch_port_vessels_api(port_code):
         'pageNo': '1'
     }
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/xml,text/xml,*/*'
-    }
-    
     vessels = []
     try:
         session = requests.Session()
         session.verify = False
-        
-        # 💡 재시도(Retry) 연결 정책 설정
-        retries = Retry(total=2, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-        session.mount('https://', HTTPAdapter(max_retries=retries))
-        
-        # 💡 Connect Timeout 10초, Read Timeout 10초로 대폭 확장
-        res = session.get(url, params=params, headers=headers, timeout=(10, 10), verify=False)
+        res = session.get(url, params=params, timeout=8)
         
         if res.status_code == 200 and res.content:
             root = ET.fromstring(res.content)
@@ -337,6 +317,7 @@ def fetch_port_vessels_api(port_code):
                 if not clsgn or not vssl_nm:
                     continue
                 
+                # 케미칼/탱커/유조선 등 HNS 위험물 주요 가능성 1차 분류
                 is_tanker = any(k in vssl_knd for k in ['케미칼', '탱커', '가스', '위험물', '유조선', 'LPG', 'LNG', 'BULK'])
                 
                 vessels.append({
@@ -354,23 +335,7 @@ def fetch_port_vessels_api(port_code):
                     "wt_ton": "-"
                 })
     except Exception as e:
-        print(f"선박운항정보 API 서버 응답 지연/오류 ({port_code}): {e}")
-        
-    # API 서버 응답 지연 시 예시 데이터 안전 모드 표출
-    if not vessels:
-        st.warning(f"🌐 [안내] 해양수산부 선박운항 서버 응답 지연으로 인해 {port_name} 예시 모니터링 모드로 표시됩니다.")
-        vessels = [
-            {
-                "vssl_nm": "101효동케미호", "clsgn": "021568", "vssl_knd": "케미칼 운반선", "vssl_nlty": "대한민국",
-                "facility": "평택 정박지 P-1", "etrypt_dt": now.strftime("%Y-%m-%d %H:%M"), "etrypt_yr": "2026", "etrypt_co": "012",
-                "unno": "1203", "chem_name": "가솔린(GASOLINE)", "is_hns": True, "wt_ton": "2204"
-            },
-            {
-                "vssl_nm": "동해글로리", "clsgn": "244802", "vssl_knd": "일반화물선", "vssl_nlty": "대한민국",
-                "facility": "평택 동부두 1선석", "etrypt_dt": now.strftime("%Y-%m-%d %H:%M"), "etrypt_yr": "2026", "etrypt_co": "003",
-                "unno": "0000", "chem_name": "일반화물", "is_hns": False, "wt_ton": "5000"
-            }
-        ]
+        print(f"선박운항정보 API 수집 에러 ({port_code}): {e}")
         
     return vessels
 
@@ -392,7 +357,7 @@ def fetch_dgst_info(unno):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=8, verify=False)
+        res = session.get(url, params=params, timeout=8)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
@@ -426,7 +391,7 @@ def fetch_chem_safety_info(cas_no):
     try:
         session = requests.Session()
         session.verify = False
-        res = session.get(url, params=params, timeout=8, verify=False)
+        res = session.get(url, params=params, timeout=8)
         root = ET.fromstring(res.content)
         item = root.find('.//item')
         if item is not None:
@@ -465,7 +430,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
             'pageNo': '1'
         }
         try:
-            res = requests.get(list_url, params=params, timeout=5, verify=False)
+            res = requests.get(list_url, params=params, timeout=5)
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
             
@@ -510,7 +475,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
         detail_url = f"{base_url}/{op_name}"
         params = {'serviceKey': PUBLIC_API_KEY, 'chemId': chem_id}
         try:
-            res = requests.get(detail_url, params=params, timeout=4, verify=False)
+            res = requests.get(detail_url, params=params, timeout=4)
             root = ET.fromstring(res.content)
             items = root.findall('.//item')
             for item in items:
@@ -662,69 +627,8 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # ==========================================
 # 4. 항구별 Open API 대시보드 렌더링 함수
 # ==========================================
-import socket
-import requests
-import xml.etree.ElementTree as ET
-
 def render_port_dashboard(port_name, port_code):
     st.markdown(f"#### 📊 {port_name} 실시간 선박 및 위험화물 모니터링 (Open API)")
-    
-    # -------------------------------------------------------------
-    # 🔬 [심층 디버깅] 배포 서버 네트워크 & API 연동 진단
-    # -------------------------------------------------------------
-    with st.expander("🔬 배포 서버 정밀 네트워크 진단 (문제 해결 후 제거)", expanded=True):
-        st.markdown("##### 1. DNS 및 도메인 IP 해상도 검증")
-        target_host = "apis.data.go.kr"
-        try:
-            ip_address = socket.gethostbyname(target_host)
-            st.success(f"✅ DNS 해석 성공: `{target_host}` ➔ `{ip_address}`")
-        except Exception as e:
-            st.error(f"❌ DNS 해석 실패: {e}")
-
-        st.markdown("##### 2. 포트별 접속 테스트 (HTTP 80 vs HTTPS 443)")
-        col_http, col_https = st.columns(2)
-        
-        # HTTP (포트 80) 테스트
-        with col_http:
-            http_url = f"http://{target_host}/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}&prtAgCd={port_code}&sde=20260801&ede=20260807&numOfRows=1&pageNo=1"
-            try:
-                res_http = requests.get(http_url, timeout=5, verify=False)
-                st.info(f"🌐 HTTP(80) 응답: `{res_http.status_code}`")
-            except Exception as e:
-                st.error(f"❌ HTTP(80) 실패: {type(e).__name__}")
-
-        # HTTPS (포트 443) 테스트
-        with col_https:
-            https_url = f"https://{target_host}/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}&prtAgCd={port_code}&sde=20260801&ede=20260807&numOfRows=1&pageNo=1"
-            try:
-                res_https = requests.get(https_url, timeout=5, verify=False)
-                st.info(f"🔒 HTTPS(443) 응답: `{res_https.status_code}`")
-            except Exception as e:
-                st.error(f"❌ HTTPS(443) 실패: {type(e).__name__}")
-
-        st.markdown("##### 3. 타 기관 공공 API(화학물질안전원) 비교 테스트")
-        chem_url = f"https://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}&numOfRows=1&pageNo=1&casNo=7664-93-9"
-        try:
-            res_chem = requests.get(chem_url, timeout=5, verify=False)
-            if res_chem.status_code == 200:
-                st.success(f"✅ 화학물질안전원 API(1480802) 통신 정상 (Status: {res_chem.status_code})")
-            else:
-                st.warning(f"⚠️ 화학물질안전원 API 응답 이상 (Status: {res_chem.status_code})")
-        except Exception as e:
-            st.error(f"❌ 화학물질안전원 API 통신 실패: {e}")
-
-        st.markdown("##### 4. 해양수산부 API 헤더 우회(User-Agent) 개별 테스트")
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-        }
-        try:
-            res_header = requests.get(https_url, headers=headers, timeout=5, verify=False)
-            st.success(f"✅ 헤더 우회 적용 시 Status: `{res_header.status_code}`")
-            st.code(res_header.text[:400], language='xml')
-        except Exception as e:
-            st.error(f"❌ 헤더 우회 적용 시에도 실패: {type(e).__name__} - {e}")
-            
     st.caption("해양수산부 선박운항정보 Open API 데이터를 실시간 연동합니다.")
     
     with st.spinner(f"{port_name} 실시간 선박 정보 연동 중..."):
