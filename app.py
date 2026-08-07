@@ -263,7 +263,7 @@ def load_kcg_vectorstore():
                 model_kwargs={'device': 'cpu'},
                 encode_kwargs={'normalize_embeddings': True}
             )
-            return Chroma(persist_directory=persist_directory, embedding_function=embeddings)
+            return Chroma(persist_dir=persist_dir, embedding_function=embeddings)
         except Exception as e:
             print(f"RAG Vector DB 로드 실패: {e}")
     return None
@@ -1064,7 +1064,7 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
 
     # 최초 접속 시 자동 조회가 안 되도록 처리
     if not st.session_state.get(state_key_fetched, False):
-        st.info(f"💡 날짜 설정 후 우측의 **[🔍 조회]** 버튼을 클릭하면 {port_name} {gb_title} 신고 선박 정보가 실시간 연동됩니다.")
+        st.info(f"💡 날짜 설정 후 우측의 **[🔍 조회]** 버튼을 클릭하면 {port_name} {gb_title} 신고 선박 정보가 조회됩니다.")
         return
 
     sde_str = start_date.strftime("%Y%m%d")
@@ -1126,17 +1126,17 @@ if kcg_logo_b64:
 else:
     st.markdown("""
     <div class="hero-container">
-        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 솔루션</div>
+        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템</div>
         <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
     </div>
     """, unsafe_allow_html=True)
 
 # ------------------------------------------
-# 🔥 HNS AI 통합 검색창 (물질명 및 사고 상황 자유 입력)
+# 🔥 HNS AI 통합 검색창 (물질명 및 사고상황 자유 입력)
 # ------------------------------------------
-st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고 상황 입력)")
+st.markdown("### 🔎 AI 통합검색 (화학물질 또는 사고상황 입력)")
 search_input = st.text_input(
-    "화학물질명, 화학식, 관용명 또는 사고 상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
+    "화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예: 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중)", 
     key="global_search_box"
 )
 
@@ -1153,7 +1153,7 @@ if search_input:
         with c1:
             info_msg = f"💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`"
             if accident_ctx:
-                info_msg += f"\n ｜ 🚨 **사고 상황 식별:** `{accident_ctx}`"
+                info_msg += f"\n ｜ 🚨 **사고상황 식별:** `{accident_ctx}`"
             st.info(info_msg)
         with c2:
             if st.button("🤖 AI 가이드 생성", key="btn_global_search", use_container_width=True):
