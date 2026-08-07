@@ -326,7 +326,7 @@ def load_kcg_vectorstore():
 kcg_vectorstore = load_kcg_vectorstore()
 
 
-def fetch_rag_context_and_images(query, k=10):
+def fetch_rag_context_and_images(query, k=5):
   """RAG 검색 결과 텍스트와 함께 해당 페이지의 고화질 이미지 리스트를 반환"""
   if not kcg_vectorstore or not query:
     return 'RAG 가이드 데이터베이스 미생성', []
@@ -1344,8 +1344,7 @@ if 'active_chem' in st.session_state:
       or not st.session_state['active_summary']
   ):
     with st.spinner(
-        'HNS 정보집 PDF + 대응가이드 PDF 이미지 렌더링 및 Gemini 종합'
-        ' 분석 중...'
+        '공공 API + HNS 정보집 + HNS 대응가이드 Gemini AI 종합 분석 중...'
     ):
       dgst_info = fetch_dgst_info(unno)
       safety_info = fetch_chem_safety_info(cas)
@@ -1355,10 +1354,10 @@ if 'active_chem' in st.session_state:
       # 변경: CAS번호(cas)를 2차 검색 조건으로 함께 전달
       pil_image, page_no = get_hns_page_image(unno if unno != "0000" else chem, cas_no=cas)
 
-      # 2. RAG 대응가이드 검색 텍스트 + 연관 5개 쪽수 원본 이미지들 렌더링
+      # 2. RAG 대응가이드 검색 텍스트 + 연관 N개 쪽수 원본 이미지들 렌더링
       rag_search_query = f'{chem} {unno} {accident_ctx} 사고 대응 방제 조치'
       rag_text, rag_images = fetch_rag_context_and_images(
-          rag_search_query, k=5
+          rag_search_query, k=10
       )
 
       st.session_state['active_source_data'] = {
