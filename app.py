@@ -662,26 +662,68 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # ==========================================
 # 4. 항구별 Open API 대시보드 렌더링 함수
 # ==========================================
-# app.py 의 render_port_dashboard 함수 시작 부분에 추가
+import socket
+import requests
+import xml.etree.ElementTree as ET
+
 def render_port_dashboard(port_name, port_code):
     st.markdown(f"#### 📊 {port_name} 실시간 선박 및 위험화물 모니터링 (Open API)")
     
-    # 🧪 [디버깅용] 배포 서버 상태 진단
-    with st.expander("🛠️ 배포 서버 상태 진단 (문제 해결 후 접어두기)", expanded=True):
-        st.write(f"- **API Key 로드 여부**: {'✅ 성공' if PUBLIC_API_KEY else '❌ 키 없음 (st.secrets 확인 필요)'}")
-        st.write(f"- **현재 서버 계산 날짜**: {(datetime.now(timezone.utc) + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')} (KST)")
-        
-        # 실제 API 1건 직렬 테스트
-        test_url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}&prtAgCd={port_code}&sde=20260801&ede=20260807&numOfRows=1&pageNo=1"
+    # -------------------------------------------------------------
+    # 🔬 [심층 디버깅] 배포 서버 네트워크 & API 연동 진단
+    # -------------------------------------------------------------
+    with st.expander("🔬 배포 서버 정밀 네트워크 진단 (문제 해결 후 제거)", expanded=True):
+        st.markdown("##### 1. DNS 및 도메인 IP 해상도 검증")
+        target_host = "apis.data.go.kr"
         try:
-            res = requests.get(test_url, timeout=5, verify=False)
-            st.write(f"- **API 상태 코드**: `{res.status_code}`")
-            if res.status_code == 200:
-                st.code(res.text[:300], language='xml')
-            else:
-                st.error(f"API 호출 실패 (상태코드: {res.status_code})")
+            ip_address = socket.gethostbyname(target_host)
+            st.success(f"✅ DNS 해석 성공: `{target_host}` ➔ `{ip_address}`")
         except Exception as e:
-            st.error(f"API 요청 에러: {e}")
+            st.error(f"❌ DNS 해석 실패: {e}")
+
+        st.markdown("##### 2. 포트별 접속 테스트 (HTTP 80 vs HTTPS 443)")
+        col_http, col_https = st.columns(2)
+        
+        # HTTP (포트 80) 테스트
+        with col_http:
+            http_url = f"http://{target_host}/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}&prtAgCd={port_code}&sde=20260801&ede=20260807&numOfRows=1&pageNo=1"
+            try:
+                res_http = requests.get(http_url, timeout=5, verify=False)
+                st.info(f"🌐 HTTP(80) 응답: `{res_http.status_code}`")
+            except Exception as e:
+                st.error(f"❌ HTTP(80) 실패: {type(e).__name__}")
+
+        # HTTPS (포트 443) 테스트
+        with col_https:
+            https_url = f"https://{target_host}/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}&prtAgCd={port_code}&sde=20260801&ede=20260807&numOfRows=1&pageNo=1"
+            try:
+                res_https = requests.get(https_url, timeout=5, verify=False)
+                st.info(f"🔒 HTTPS(443) 응답: `{res_https.status_code}`")
+            except Exception as e:
+                st.error(f"❌ HTTPS(443) 실패: {type(e).__name__}")
+
+        st.markdown("##### 3. 타 기관 공공 API(화학물질안전원) 비교 테스트")
+        chem_url = f"https://apis.data.go.kr/1480802/iciskischem/kischemlist?serviceKey={PUBLIC_API_KEY}&numOfRows=1&pageNo=1&casNo=7664-93-9"
+        try:
+            res_chem = requests.get(chem_url, timeout=5, verify=False)
+            if res_chem.status_code == 200:
+                st.success(f"✅ 화학물질안전원 API(1480802) 통신 정상 (Status: {res_chem.status_code})")
+            else:
+                st.warning(f"⚠️ 화학물질안전원 API 응답 이상 (Status: {res_chem.status_code})")
+        except Exception as e:
+            st.error(f"❌ 화학물질안전원 API 통신 실패: {e}")
+
+        st.markdown("##### 4. 해양수산부 API 헤더 우회(User-Agent) 개별 테스트")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        }
+        try:
+            res_header = requests.get(https_url, headers=headers, timeout=5, verify=False)
+            st.success(f"✅ 헤더 우회 적용 시 Status: `{res_header.status_code}`")
+            st.code(res_header.text[:400], language='xml')
+        except Exception as e:
+            st.error(f"❌ 헤더 우회 적용 시에도 실패: {type(e).__name__} - {e}")
             
     st.caption("해양수산부 선박운항정보 Open API 데이터를 실시간 연동합니다.")
     
