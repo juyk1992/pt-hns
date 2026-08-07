@@ -630,8 +630,27 @@ def generate_gemini_summary(chem_name, unno, cas_no, dgst_info, safety_info, kos
 # ==========================================
 # 4. 항구별 Open API 대시보드 렌더링 함수
 # ==========================================
+# app.py 의 render_port_dashboard 함수 시작 부분에 추가
 def render_port_dashboard(port_name, port_code):
     st.markdown(f"#### 📊 {port_name} 실시간 선박 및 위험화물 모니터링 (Open API)")
+    
+    # 🧪 [디버깅용] 배포 서버 상태 진단
+    with st.expander("🛠️ 배포 서버 상태 진단 (문제 해결 후 접어두기)", expanded=True):
+        st.write(f"- **API Key 로드 여부**: {'✅ 성공' if PUBLIC_API_KEY else '❌ 키 없음 (st.secrets 확인 필요)'}")
+        st.write(f"- **현재 서버 계산 날짜**: {(datetime.now(timezone.utc) + timedelta(hours=9)).strftime('%Y-%m-%d %H:%M:%S')} (KST)")
+        
+        # 실제 API 1건 직렬 테스트
+        test_url = f"https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}&prtAgCd={port_code}&sde=20260801&ede=20260807&numOfRows=1&pageNo=1"
+        try:
+            res = requests.get(test_url, timeout=5, verify=False)
+            st.write(f"- **API 상태 코드**: `{res.status_code}`")
+            if res.status_code == 200:
+                st.code(res.text[:300], language='xml')
+            else:
+                st.error(f"API 호출 실패 (상태코드: {res.status_code})")
+        except Exception as e:
+            st.error(f"API 요청 에러: {e}")]
+            
     st.caption("해양수산부 선박운항정보 Open API 데이터를 실시간 연동합니다.")
     
     with st.spinner(f"{port_name} 실시간 선박 정보 연동 중..."):
