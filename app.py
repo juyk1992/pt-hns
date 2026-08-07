@@ -1354,11 +1354,29 @@ if 'active_chem' in st.session_state:
       # 변경: CAS번호(cas)를 2차 검색 조건으로 함께 전달
       pil_image, page_no = get_hns_page_image(unno if unno != "0000" else chem, cas_no=cas)
 
-      # 2. RAG 대응가이드 검색 텍스트 + 연관 N개 쪽수 원본 이미지들 렌더링
-      rag_search_query = f'{chem} {unno} {accident_ctx} 사고 대응 방제 조치'
+      # 💡 1단계: 수집된 위험물 정보(dgst_info)와 사고 상황(accident_ctx)을 결합하여 고도화된 RAG 쿼리 생성
+      hazard_kind = dgst_info.get('kndNm', '') # 예: 물반응성물질, 인화성액체 등
+      em_s = dgst_info.get('emergManagtCd', '') # 예: F-E, S-D (EmS 지침 코드)
+      
+      # 사고 상황 키워드 추출 (화재, 폭발, 유출, 침수 등)
+      situation_keyword = accident_ctx if accident_ctx else "해상 화재 및 유출 복합사고"
+      
+      # RAG 검색 전용 의미론적(Semantic) 질의어 조합
+      rag_search_query = (
+          f"위험유해물질 HNS {chem} "
+          f"성상 분류 {hazard_kind} "
+          f"비상대응지침 EmS {em_s} "
+          f"상황별 방제조치 및 안전거리 이격지침 {situation_keyword}"
+      )
+      
+      # 디버깅용 로그 (터미널에서 어떤 쿼리로 검색되는지 확인용)
+      print(f"🔍 [RAG 고도화 쿼리]: {rag_search_query}")
+
+      # 2. 고도화된 쿼리로 RAG 대응가이드 검색 텍스트 + 연관 이미지 렌더링
       rag_text, rag_images = fetch_rag_context_and_images(
           rag_search_query, k=10
       )
+
 
       st.session_state['active_source_data'] = {
           'dgst': dgst_info,
