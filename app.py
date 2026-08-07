@@ -680,14 +680,19 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
     sde_fmt = (now_kst - timedelta(days=1)).strftime("%Y-%m-%d")
     ede_fmt = (now_kst + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # 💡 "기준)" 글자 바로 옆에 소형 갱신 버튼을 가로로 정렬
-    col_head, col_btn, _ = st.columns([0.65, 0.2, 0.15])
-    with col_head:
+    # 💡 좌측은 제목, 우측 끝에 버튼 배치 (공간 자동 분할)
+    col_title, col_btn = st.columns([0.8, 0.2])
+    
+    with col_title:
         st.markdown(f"#### 📊 {port_name} {gb_title} 신고 선박 현황 (`{sde_fmt}` ~ `{ede_fmt}` 기준)")
+        
     with col_btn:
+        # 우측 정렬을 위해 약간의 상단 여백 보정 및 버튼 생성
+        st.markdown("<div style='text-align: right;'>", unsafe_allow_html=True)
         if st.button(f"🔄 실시간 데이터 갱신", key=f"refresh_{port_code}_{de_gb}", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with st.spinner(f"{port_name} {gb_title} 선박 전체 데이터 수집 중..."):
         vessels = fetch_vessel_schedule_api(port_code, de_gb)
