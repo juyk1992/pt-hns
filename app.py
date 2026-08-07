@@ -201,38 +201,40 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
 
 # ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 (물리 페이지 40페이지~221페이지 전수 탐색)
+# 1. 🖼️ PDF 인덱스 맵 생성 (스캔 범위를 인덱스 38~221로 안전 확장)
 # ==========================================
 
 @st.cache_data
 def build_hns_pdf_index(pdf_path):
     """
     HNS 정보집 PDF 물리적 인덱스 직접 매핑
-    - 물리적 40번째 페이지(index 39) ~ 221번째 페이지(index 220) 정확 순회
+    - 과산화수소 누락 방지를 위해 인덱스 38(물리 39쪽)부터 안전 스캔
     """
     if not os.path.exists(pdf_path):
         return []
 
     index_list = []
     with pdfplumber.open(pdf_path) as pdf:
-        # 물리 페이지 index 39 ~ 220 (실제 물리적 40페이지 ~ 221페이지)
-        for idx in range(39, min(221, len(pdf.pages))):
+        # 안전하게 인덱스 38 ~ 220 (물리적 39페이지 ~ 221페이지) 스캔
+        start_idx = 38
+        end_idx = min(221, len(pdf.pages))
+        
+        for idx in range(start_idx, end_idx):
             page = pdf.pages[idx]
             text = page.extract_text() or ""
             
             if not text.strip():
                 continue
 
-            # UN번호 4자리 추출
-            unno_match = re.search(r'UN번호\s*(\d{4})', text)
+            # UN번호 추출 정규식 보완 (공백/줄바꿈 유연 처리)
+            unno_match = re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE) or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE)
             unno = unno_match.group(1).strip() if unno_match else ""
             
-            # 페이지 첫 줄 물질명
+            # 페이지 줄 단위 파싱
             lines = [line.strip() for line in text.split('\n') if line.strip()]
             title = lines[0] if lines else ""
             
-            # 유사명 추출
-            synonym_match = re.search(r'유사명\s*([^\n]+)', text)
+            synonym_match = re.search(r'유사명\s*[:\s]*([^\n]+)', text)
             synonyms = synonym_match.group(1).strip() if synonym_match else ""
 
             index_list.append({
@@ -240,7 +242,8 @@ def build_hns_pdf_index(pdf_path):
                 "display_page_no": idx + 1,   # 1-based 물리 페이지 번호 (예: 40페이지)
                 "unno": unno,
                 "title": title,
-                "synonyms": synonyms
+                "synonyms": synonyms,
+                "raw_text": text.upper()      # 💡 전체 텍스트 상위 매칭용 보관
             })
     return index_list
 
@@ -248,7 +251,7 @@ hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
 
 
 def get_hns_page_image(unno_or_query):
-    """UN번호 또는 물질명으로 해당 물리적 PDF 페이지(40~221)를 300DPI 이미지로 렌더링"""
+    """UN번호, 물질명, 유사명 및 전체 텍스트 교차 검색으로 해당 PDF 페이지 렌더링"""
     if not hns_pdf_index or not unno_or_query or not os.path.exists(HNS_PDF_PATH):
         return None, None
 
@@ -259,8 +262,14 @@ def get_hns_page_image(unno_or_query):
         unno = str(item['unno']).strip()
         title = item['title'].upper()
         synonyms = item['synonyms'].upper()
+        raw_text = item.get('raw_text', '')
 
+        # 1차: UN번호 또는 제목/유사명 직접 일치
         if (q and q == unno) or (q in title) or (q in synonyms):
+            target_item = item
+            break
+        # 2차: 페이지 전체 텍스트 내 포함 여부 (과산화수소 등 예외 케이스 방지)
+        elif len(q) >= 2 and q in raw_text:
             target_item = item
             break
 
@@ -269,7 +278,6 @@ def get_hns_page_image(unno_or_query):
 
     try:
         with pdfplumber.open(HNS_PDF_PATH) as pdf:
-            # 지정된 물리적 인덱스 페이지 바로 렌더링
             page = pdf.pages[target_item['page_index']]
             pix = page.to_image(resolution=300)
             return pix.original, target_item['display_page_no']
