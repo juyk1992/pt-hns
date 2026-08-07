@@ -649,7 +649,7 @@ def render_port_dashboard(port_name, port_code):
             else:
                 st.error(f"API 호출 실패 (상태코드: {res.status_code})")
         except Exception as e:
-            st.error(f"API 요청 에러: {e}")]
+            st.error(f"API 요청 에러: {e}")
             
     st.caption("해양수산부 선박운항정보 Open API 데이터를 실시간 연동합니다.")
     
