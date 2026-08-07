@@ -1,0 +1,30 @@
+name: Test Public Open API Connection
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: # GitHub 웹 인터페이스에서 수동 실행(Run workflow) 가능하게 설정
+
+jobs:
+  api-test:
+    runs-on: ubuntu-latest # 미국/해외 서버 환경에서 실행됨
+
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Run Open API Test Script
+      env:
+        PUBLIC_API_KEY: ${{ secrets.PUBLIC_API_KEY }}
+      run: |
+        python test_github_api.py
