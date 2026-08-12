@@ -3,8 +3,6 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
-import threading
-import time
 import urllib3
 import xml.etree.ElementTree as ET
 
@@ -48,13 +46,13 @@ kcg_logo_b64 = get_base64_logo(KCG_LOGO_PATH)
 
 # 페이지 설정
 st.set_page_config(
-    page_title='평택해양경찰서 HNS AI 대응 시스템',
+    page_title='평택해양경찰서 HNS AI 대응 시스템 (Vision)',
     page_icon=KCG_LOGO_PATH if os.path.exists(KCG_LOGO_PATH) else '🚢',
     layout='wide',
     initial_sidebar_state='collapsed',
 )
 
-# Light UI + 모바일 가시성 CSS
+# Reflex.dev 감성 Light UI + 모바일 완벽 가시성 보장 CSS
 st.markdown(
     """
 <style>
@@ -181,115 +179,116 @@ st.markdown(
 PUBLIC_API_KEY = st.secrets.get('PUBLIC_API_KEY', '')
 GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
+# ==========================================
+# 1. 🖼️ PDF 인덱스 맵 생성 (최초 1회 실행 후 st.session_state 영구 고정)
+# ==========================================
 
-# ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 (세션 상태 영구 저장으로 팝업 클릭 시 재로딩 완벽 차단)
-# ==========================================
 
 @st.cache_data(show_spinner=False)
 def build_hns_pdf_index_once(pdf_path):
-    """
-    HNS 정보집 PDF 본문 영역(물리 페이지 38~222) 전수 스캔 매핑 (최초 1회만 캐싱)
-    """
-    if not os.path.exists(pdf_path):
-        return []
+  """HNS 정보집 PDF 본문 영역(물리 페이지 38~222) 전수 스캔 매핑 (최초 1회만 실행)"""
+  if not os.path.exists(pdf_path):
+    return []
 
-    index_list = []
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            start_idx = 38   # 물리 39페이지 (0-based)
-            end_idx = min(223, len(pdf.pages)) # 물리 223페이지까지 커버
+  index_list = []
+  try:
+    with pdfplumber.open(pdf_path) as pdf:
+      start_idx = 38  # 물리 39페이지 (0-based)
+      end_idx = min(223, len(pdf.pages))  # 물리 223페이지까지 커버
 
-            for idx in range(start_idx, end_idx):
-                page = pdf.pages[idx]
-                text = page.extract_text() or ""
+      for idx in range(start_idx, end_idx):
+        page = pdf.pages[idx]
+        text = page.extract_text() or ''
 
-                if not text.strip():
-                    continue
+        if not text.strip():
+          continue
 
-                # UN번호 추출
-                unno_match = re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE) or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE) or re.search(r'(\d{4})', text)
-                unno = unno_match.group(1).strip() if unno_match else ""
+        unno_match = (
+            re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE)
+            or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE)
+            or re.search(r'(\d{4})', text)
+        )
+        unno = unno_match.group(1).strip() if unno_match else ''
 
-                lines = [line.strip() for line in text.split('\n') if line.strip()]
-                title = lines[0] if lines else ""
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        title = lines[0] if lines else ''
 
-                synonym_match = re.search(r'유사명\s*[:\s]*([^\n]+)', text)
-                synonyms = synonym_match.group(1).strip() if synonym_match else ""
+        synonym_match = re.search(r'유사명\s*[:\s]*([^\n]+)', text)
+        synonyms = synonym_match.group(1).strip() if synonym_match else ''
 
-                index_list.append({
-                    "page_index": idx,            # 0-based 물리 인덱스
-                    "display_page_no": idx + 1,   # 1-based 물리 페이지 번호
-                    "unno": unno,
-                    "title": title,
-                    "synonyms": synonyms,
-                    "raw_text": text.upper()
-                })
-    except Exception as e:
-        print(f"PDF 인덱스 구축 중 에러: {e}")
+        index_list.append({
+            'page_index': idx,  # 0-based 물리 인덱스
+            'display_page_no': idx + 1,  # 1-based 물리 페이지 번호
+            'unno': unno,
+            'title': title,
+            'synonyms': synonyms,
+            'raw_text': text.upper(),
+        })
+  except Exception as e:
+    print(f'PDF 인덱스 구축 중 에러: {e}')
 
-    return index_list
-
-# 💡 세션 상태를 활용해 앱 기동 시 단 1회만 로딩
-if 'hns_pdf_index' not in st.session_state or not st.session_state['hns_pdf_index']:
-    with st.spinner("🚀 [최초 1회] HNS 정보집 PDF 인덱스를 세션에 등록 중..."):
-        st.session_state['hns_pdf_index'] = build_hns_pdf_index_once(HNS_PDF_PATH)
-
-hns_pdf_index = st.session_state['hns_pdf_index']
+  return index_list
 
 
-def get_hns_page_image(unno_or_query, cas_no="-"):
-    """
-    [4단계 순차 탐색 방식]
-    1차: CAS번호 일치 검색 ➔ 2차: UN번호 일치 ➔ 3차: 물질명 ➔ 4차: 전체 텍스트
-    """
-    idx_list = st.session_state.get('hns_pdf_index', [])
-    if not idx_list or not os.path.exists(HNS_PDF_PATH):
-        return None, None
+if (
+    'hns_pdf_index' not in st.session_state
+    or not st.session_state['hns_pdf_index']
+):
+  st.session_state['hns_pdf_index'] = build_hns_pdf_index_once(HNS_PDF_PATH)
 
-    q = str(unno_or_query).strip().upper()
-    q_cas = str(cas_no).strip()
-    target_item = None
 
-    # 1차: CAS번호로 찾기
-    if not target_item and q_cas and q_cas not in ["-", "0000", "없음"]:
-        for item in idx_list:
-            if q_cas in item.get('raw_text', ''):
-                target_item = item
-                break
+def get_hns_page_image(unno_or_query, cas_no='-'):
+  """[본문 영역 내 4단계 순차 탐색 방식]
 
-    # 2차: UN번호로 찾기
-    if not target_item and q.isdigit() and len(q) == 4:
-        for item in idx_list:
-            if item['unno'] == q:
-                target_item = item
-                break
+  1차: CAS번호 ➔ 2차: UN번호 ➔ 3차: 물질명 ➔ 4차: 전체 텍스트
+  """
+  idx_list = st.session_state.get('hns_pdf_index', [])
+  if not idx_list or not os.path.exists(HNS_PDF_PATH):
+    return None, None
 
-    # 3차: 물질명 또는 유사명 매칭
-    if not target_item and q:
-        for item in idx_list:
-            if q in item['title'].upper() or q in item['synonyms'].upper():
-                target_item = item
-                break
+  q = str(unno_or_query).strip().upper()
+  q_cas = str(cas_no).strip()
+  target_item = None
 
-    # 4차: 전체 텍스트 내 포함 검색
-    if not target_item and len(q) >= 2:
-        for item in idx_list:
-            if q in item['raw_text']:
-                target_item = item
-                break
+  # 1차: CAS번호로 찾기
+  if not target_item and q_cas and q_cas not in ['-', '0000', '없음']:
+    for item in idx_list:
+      if q_cas in item.get('raw_text', ''):
+        target_item = item
+        break
 
-    if target_item is None:
-        return None, None
+  # 2차: UN번호로 찾기
+  if not target_item and q.isdigit() and len(q) == 4:
+    for item in idx_list:
+      if item['unno'] == q:
+        target_item = item
+        break
 
-    try:
-        with pdfplumber.open(HNS_PDF_PATH) as pdf:
-            page = pdf.pages[target_item['page_index']]
-            pix = page.to_image(resolution=300)
-            return pix.original, target_item['display_page_no']
-    except Exception as e:
-        print(f"HNS 정보집 PDF 이미지 렌더링 에러: {e}")
-        return None, None
+  # 3차: 물질명 또는 유사명 매칭
+  if not target_item and q:
+    for item in idx_list:
+      if q in item['title'].upper() or q in item['synonyms'].upper():
+        target_item = item
+        break
+
+  # 4차: 전체 텍스트 내 포함 검색
+  if not target_item and len(q) >= 2:
+    for item in idx_list:
+      if q in item['raw_text']:
+        target_item = item
+        break
+
+  if target_item is None:
+    return None, None
+
+  try:
+    with pdfplumber.open(HNS_PDF_PATH) as pdf:
+      page = pdf.pages[target_item['page_index']]
+      pix = page.to_image(resolution=300)
+      return pix.original, target_item['display_page_no']
+  except Exception as e:
+    print(f'HNS 정보집 PDF 이미지 렌더링 에러: {e}')
+    return None, None
 
 
 # 🧠 RAG Vector DB 로드 모듈
@@ -333,7 +332,6 @@ def fetch_rag_context_and_images(query, k=5):
         page_numbers.append(page_no)
       context_items.append(f'[대응가이드 {page_no}쪽 지침]\n{doc.page_content}')
 
-    # 🖼️ 해당 쪽수들을 대응가이드 PDF에서 고화질 이미지로 렌더링
     rag_images = []
     if os.path.exists(KCG_GUIDE_PDF_PATH):
       with pdfplumber.open(KCG_GUIDE_PDF_PATH) as pdf:
@@ -349,7 +347,7 @@ def fetch_rag_context_and_images(query, k=5):
 
 
 # ==========================================
-# 2. 공공 API 연동 모듈
+# 2. 공공 API 연동 모듈 (선박입출항 및 스펙)
 # ==========================================
 
 
@@ -481,6 +479,50 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
   return vessels
 
 
+def fetch_vessel_spec_api(clsgn, vssl_nm):
+  if not PUBLIC_API_KEY:
+    return None
+  url = f'https://apis.data.go.kr/1192000/SicsVsslManp3/Info3?serviceKey={PUBLIC_API_KEY}'
+  headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+  trials = [('clsgn', str(clsgn).strip()), ('vsslNm', str(vssl_nm).strip())]
+
+  for param_key, param_val in trials:
+    if not param_val or param_val == '-':
+      continue
+    params = {param_key: param_val, 'numOfRows': '1', 'pageNo': '1'}
+    try:
+      session = requests.Session()
+      session.verify = False
+      res = session.get(url, params=params, headers=headers, timeout=8)
+      if res.status_code == 200 and res.content:
+        root = ET.fromstring(res.content)
+        item = root.find('.//item')
+        if item is not None:
+          return {
+              'vsslNo': (item.findtext('vsslNo') or '-').strip(),
+              'imoNo': (item.findtext('imoNo') or '-').strip(),
+              'vsslKorNm': (item.findtext('vsslKorNm') or '-').strip(),
+              'vsslEngNm': (item.findtext('vsslEngNm') or '-').strip(),
+              'vsslKnd': (item.findtext('vsslKnd') or '-').strip(),
+              'vsslNlty': (item.findtext('vsslNlty') or '-').strip(),
+              'grtg': (item.findtext('grtg') or '-').strip(),
+              'vsslTotLt': (item.findtext('vsslTotLt') or '-').strip(),
+              'shdth': (item.findtext('shdth') or '-').strip(),
+              'vsslDrft': (item.findtext('vsslDrft') or '-').strip(),
+              'vsslDp': (item.findtext('vsslDp') or '-').strip(),
+              'brbtSeNm': (item.findtext('brbtSeNm') or '-').strip(),
+              'nvgShapNm': (item.findtext('nvgShapNm') or '-').strip(),
+              'vsslCnstrDt': (
+                  (item.findtext('vsslCnstrDt') or '-')
+                  .strip()
+                  .replace('T', ' ')
+              ),
+          }
+    except Exception as e:
+      print(f'선박제원 API 조회 에러: {e}')
+  return None
+
+
 def fetch_dgst_info(unno):
   if not unno or unno in ['0000', '-', '']:
     return {
@@ -570,7 +612,7 @@ def fetch_chem_safety_info(cas_no):
 def fetch_kosha_msds_info(chem_name, cas_no, unno):
   base_url = 'https://msds.kosha.or.kr/openapi/service/msdschem'
   chem_id = None
-  search_trials = [(cas_no, '1'), (unno, '2'), (chem_name, '0')]
+  search_trials = [(unno, '2'), (cas_no, '1'), (chem_name, '0')]
 
   for search_wrd, search_cnd in search_trials:
     if not search_wrd or str(search_wrd).strip() in [
@@ -645,179 +687,6 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-def fetch_vessel_spec_api(clsgn, vssl_nm):
-  if not PUBLIC_API_KEY:
-    return None
-  url = f'https://apis.data.go.kr/1192000/SicsVsslManp3/Info3?serviceKey={PUBLIC_API_KEY}'
-  headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-  trials = [('clsgn', str(clsgn).strip()), ('vsslNm', str(vssl_nm).strip())]
-
-  for param_key, param_val in trials:
-    if not param_val or param_val == '-':
-      continue
-    params = {param_key: param_val, 'numOfRows': '1', 'pageNo': '1'}
-    try:
-      session = requests.Session()
-      session.verify = False
-      res = session.get(url, params=params, headers=headers, timeout=8)
-      if res.status_code == 200 and res.content:
-        root = ET.fromstring(res.content)
-        item = root.find('.//item')
-        if item is not None:
-          return {
-              'vsslNo': (item.findtext('vsslNo') or '-').strip(),
-              'imoNo': (item.findtext('imoNo') or '-').strip(),
-              'vsslKorNm': (item.findtext('vsslKorNm') or '-').strip(),
-              'vsslEngNm': (item.findtext('vsslEngNm') or '-').strip(),
-              'vsslKnd': (item.findtext('vsslKnd') or '-').strip(),
-              'vsslNlty': (item.findtext('vsslNlty') or '-').strip(),
-              'grtg': (item.findtext('grtg') or '-').strip(),
-              'vsslTotLt': (item.findtext('vsslTotLt') or '-').strip(),
-              'shdth': (item.findtext('shdth') or '-').strip(),
-              'vsslDrft': (item.findtext('vsslDrft') or '-').strip(),
-              'vsslDp': (item.findtext('vsslDp') or '-').strip(),
-              'brbtSeNm': (item.findtext('brbtSeNm') or '-').strip(),
-              'nvgShapNm': (item.findtext('nvgShapNm') or '-').strip(),
-              'vsslCnstrDt': (
-                  (item.findtext('vsslCnstrDt') or '-')
-                  .strip()
-                  .replace('T', ' ')
-              ),
-          }
-    except Exception as e:
-      print(f'선박제원 API 조회 에러: {e}')
-  return None
-
-
-def fetch_cargo_inout_api(port_code, etrypt_year, etrypt_co, clsgn):
-  if not PUBLIC_API_KEY:
-    return []
-  url_in = f'https://apis.data.go.kr/1192000/CargFrghtIn2/Info?serviceKey={PUBLIC_API_KEY}'
-  url_out = f'https://apis.data.go.kr/1192000/CargFrghtOut4/Info4?serviceKey={PUBLIC_API_KEY}'
-  headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-  params = {
-      'prtAgCd': str(port_code).strip(),
-      'etryptYear': str(etrypt_year).strip(),
-      'etryptCo': str(etrypt_co).strip().zfill(3),
-      'clsgn': str(clsgn).strip(),
-      'numOfRows': '50',
-      'pageNo': '1',
-  }
-  combined_cargo_list = []
-
-  # 1. 내항화물
-  try:
-    session = requests.Session()
-    session.verify = False
-    res_in = session.get(url_in, params=params, headers=headers, timeout=8)
-    if res_in.status_code == 200 and res_in.content:
-      root = ET.fromstring(res_in.content)
-      for item in root.findall('.//item') or root.findall('body/items/item'):
-        kor_nm = (
-            item.findtext('frghtPrdlstKorNm')
-            or item.findtext('frghtPrdlstNm')
-            or '-'
-        ).strip()
-        dgst_code = (item.findtext('dgstLdadngYn') or '-').strip()
-        extracted_unno = ''
-        if kor_nm != '-' or dgst_code == '1':
-          map_res = map_search_query_with_gemini(kor_nm)
-          extracted_unno = str(map_res.get('unno', '0000')).zfill(4)
-          if extracted_unno == '0000':
-            extracted_unno = ''
-
-        combined_cargo_list.append({
-            'cargo_type': '내항화물',
-            'etryndDt': (
-                (item.findtext('etryndDt') or '-').strip().replace('T', ' ')
-            ),
-            'tkinTkoutNm': (item.findtext('tkinTkoutNm') or '-').strip(),
-            'laidupFcltyNm': (item.findtext('laidupFcltyNm') or '-').strip(),
-            'frghtPrdlstCd': (item.findtext('frghtPrdlstCd') or '-').strip(),
-            'frghtPrdlstKorNm': kor_nm,
-            'frghtPrdlstEngNm': (
-                item.findtext('frghtPrdlstEngNm') or '-'
-            ).strip(),
-            'dgstLdadngYn': (
-                '⚠️ 위험물 적재' if dgst_code == '1' else '일반/비위험물'
-            ),
-            'frghtClCd': (item.findtext('frghtClCd') or '-').strip(),
-            'frghtClNm': (item.findtext('frghtClNm') or '-').strip(),
-            'lduldPrtNm': (item.findtext('lduldPrtNm') or '-').strip(),
-            'wtTon': (item.findtext('wtTon') or '-').strip(),
-            'satmntDt': (
-                (item.findtext('satmntDt') or '-').strip().replace('T', ' ')
-            ),
-            'packngKndNm': (item.findtext('packngKndNm') or '-').strip(),
-            'lnlMthNm': (item.findtext('lnlMthNm') or '-').strip(),
-            'aprtfEtryptDt': (
-                (item.findtext('aprtfEtryptDt') or '-')
-                .strip()
-                .replace('T', ' ')
-            ),
-            'lnlEntrpsNm': (item.findtext('lnlEntrpsNm') or '-').strip(),
-            'unno': extracted_unno,
-        })
-  except Exception as e:
-    print(f'내항화물 API 예외: {e}')
-
-  # 2. 외항화물
-  try:
-    session = requests.Session()
-    session.verify = False
-    res_out = session.get(url_out, params=params, headers=headers, timeout=8)
-    if res_out.status_code == 200 and res_out.content:
-      root = ET.fromstring(res_out.content)
-      for item in root.findall('.//item') or root.findall('body/items/item'):
-        kor_nm = (
-            item.findtext('frghtPrdlstKorNm')
-            or item.findtext('frghtPrdlstNm')
-            or '-'
-        ).strip()
-        raw_unno = (item.findtext('unno') or '').strip()
-        raw_unno = '' if raw_unno in ['-', '0000', 'None', ''] else raw_unno.zfill(4)
-
-        extracted_unno = raw_unno
-        if not extracted_unno and kor_nm != '-':
-          map_res = map_search_query_with_gemini(kor_nm)
-          extracted_unno = str(map_res.get('unno', '0000')).zfill(4)
-          if extracted_unno == '0000':
-            extracted_unno = ''
-
-        combined_cargo_list.append({
-            'cargo_type': '외항화물',
-            'laidupFcltyNm': (item.findtext('laidupFcltyNm') or '-').strip(),
-            'frghtPrdlstCd': (item.findtext('frghtPrdlstCd') or '-').strip(),
-            'frghtPrdlstKorNm': kor_nm,
-            'unno': extracted_unno,
-            'frghtClCd': (item.findtext('frghtClCd') or '-').strip(),
-            'frghtClNm': (item.findtext('frghtClNm') or '-').strip(),
-            'etryndDt': (
-                (item.findtext('etryndDt') or '-').strip().replace('T', ' ')
-            ),
-            'ldPrtNm': (item.findtext('ldPrtNm') or '-').strip(),
-            'satmntDt': (
-                (item.findtext('satmntDt') or '-').strip().replace('T', ' ')
-            ),
-            'packngKndNm': (item.findtext('packngKndNm') or '-').strip(),
-            'lnlEntrpsNm': (item.findtext('lnlEntrpsNm') or '-').strip(),
-            'lnlMthNm': (item.findtext('lnlMthNm') or '-').strip(),
-            'wtTon': (item.findtext('wtTon') or '-').strip(),
-            'aprtfEtryptDt': (
-                (item.findtext('aprtfEtryptDt') or '-')
-                .strip()
-                .replace('T', ' ')
-            ),
-            'spprnNm': (item.findtext('spprnNm') or '-').strip(),
-            'contnCo': (item.findtext('contnCo') or '-').strip(),
-            'dgstYn': '⚠️ 위험물(UN.No)' if extracted_unno else '일반화물',
-        })
-  except Exception as e:
-    print(f'외항화물 API 예외: {e}')
-
-  return combined_cargo_list
-
-
 # ==========================================
 # 3. 🧠 Gemini Vision 멀티모달 프롬프트 연동
 # ==========================================
@@ -873,29 +742,51 @@ def map_search_query_with_gemini(query_text):
     return default_res
 
 
-def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_info, kosha_msds_text, rag_text, hns_pil_image=None, hns_page_no=None, rag_images=[], accident_context=""):
-    """
-    [끝판왕 멀티모달 Gemini Vision 통합 생성]
-    - 공문서 서식(수신, 발신 등) 제거 및 핵심 요약부터 즉시 출력되도록 개선
-    """
-    if not GEMINI_API_KEY:
-        return "⚠️ Gemini API 키가 설정되지 않았습니다."
+def generate_gemini_vision_summary(
+    chem_name,
+    unno,
+    cas_no,
+    dgst_info,
+    safety_info,
+    kosha_msds_text,
+    rag_text,
+    hns_pil_image=None,
+    hns_page_no=None,
+    rag_images=[],
+    accident_context='',
+):
+  """[끝판왕 멀티모달 Gemini Vision 통합 생성] - 공문서 서식 제거 및 역할 분담 적용"""
+  if not GEMINI_API_KEY:
+    return '⚠️ Gemini API 키가 설정되지 않았습니다.'
 
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
+  try:
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
-        accident_info = f"\n🚨 [현장 사고 상황 조건]: {accident_context}\n" if accident_context else ""
-        
-        hns_img_prompt = f"\n- [첨부 이미지 1]: 해경 HNS 정보집 {hns_page_no}쪽 원본 스캔 이미지입니다. 표, 세로 쓰기, NFPA 픽토그램 수치 등을 직접 판독하여 반영하세요.\n" if (hns_pil_image and hns_page_no) else ""
-        
-        rag_img_prompt = ""
-        if rag_images:
-            rag_pages_str = ", ".join([f"{img['page_no']}쪽" for img in rag_images])
-            rag_img_prompt = f"\n- [첨부 이미지 추가]: 해경 HNS 해양사고 대응 가이드 ({rag_pages_str}) 원본 스캔 이미지들입니다.\n"
+    accident_info = (
+        f'\n🚨 [현장 사고 상황 조건]: {accident_context}\n'
+        if accident_context
+        else ''
+    )
 
-        prompt_text = f"""
+    hns_img_prompt = (
+        f'\n- [첨부 이미지 1]: 해경 HNS 정보집 {hns_page_no}쪽 원본 스캔'
+        ' 이미지입니다. 표, 세로 쓰기, NFPA 픽토그램 수치 등을 직접'
+        ' 판독하여 반영하세요.\n'
+        if (hns_pil_image and hns_page_no)
+        else ''
+    )
+
+    rag_img_prompt = ''
+    if rag_images:
+      rag_pages_str = ', '.join([f"{img['page_no']}쪽" for img in rag_images])
+      rag_img_prompt = (
+          '\n- [첨부 이미지 추가]: 해경 HNS 해양사고 대응 가이드'
+          f' ({rag_pages_str}) 원본 스캔 이미지들입니다.\n'
+      )
+
+    prompt_text = f"""
         당신은 해양경찰청 및 항만 HNS 비상대응 상황실의 최고 수석 관제관입니다.
-        첨부된 [HNS 정보집 원본 스캔 이미지]와 [해양사고 대응 가이드 원본 스캔 이미지들], 그리고 수집된 다중 데이터(공공 API, MSDS, RAG 텍스트)를 철저히 교차 분석하여, 현장 세력(OSC, 경비함정, 특수구조대 등)에 즉각 하달할 수 있는 가장 전문적이고 완벽한 **비상대응 지시서**를 작성하세요.
+        첨부된 [HNS 정보집 원본 스캔 이미지]와 [해양사고 대응 가이드 원본 스캔 이미지들], 그리고 수집된 다중 데이터(공공 API, MSDS, RAG 텍스트)를 철저히 교차 분석하여, 현장 세력(OSC, 경비함정, 특수구조대 등)에 즉각 하달할 수 있는 가장 전문적이고 완벽한 비상대응 지시서를 작성하세요.
 
         {accident_info}
         {hns_img_prompt}
@@ -925,15 +816,15 @@ def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_in
         - 기타물질 / 잠정평가물질: 위해가 없거나 잠정 평가된 물질
         (※ 첨부된 정보집 이미지상의 운송방법/유해액체물질 분류(X,Y,Z류) 및 해상 거동 특성을 식별하여 방제 조치에 반드시 반영하세요.)
 
-        [엄격 작성 규칙]
+        [상황실 지침 반영 엄격 작성 규칙]
         1. **데이터 출처별 역할 분담 (최우선 원칙)**:
            - **화학물질의 특성, 성상, 유해성, 증상, MSDS 수치**: 해양수산부 위험물정보, 화학물질안전원, 안전보건공단 API를 통해 수집된 데이터를 최우선으로 반영하여 정확한 물질 정보를 기재하세요.
            - **현장 대응, 초동 이격 거리, 대피 거리, 개인 보호구, 방제 및 소화 요령**: 해경 HNS 정보집 원본 이미지 및 해경 HNS 대응가이드(RAG) 이미지에 기재된 지침을 최우선으로 반영하여 현장 실행 위주로 작성하세요. (근본적인 물질 스펙은 전문 기관 API를 따르고, 실전 대응 전략은 해경 전문 가이드를 따를 것)
-        2. **초동대응 핵심요약 작성**: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 세력이 즉시 이해할 수 있는 명확한 개조식 문장으로 작성하세요.
-        3. **예외 및 안전 보완 기준**: 
-           - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
-           - 물 반응성 물질 확인 시 직사주수 절대 금지 및 분무(안개) 주수 지침을 명시하세요.
-        4. **출력 형식 엄격 준수**: 공문서 서식(수신, 발신 등)을 절대 생성하지 말고, 반드시 `### 🚨 [초동대응 핵심요약]` 제목부터 곧바로 출력을 시작하세요.
+        2. **작성 서식 제한**: 공문서 서식(수신, 발신, 일시, 제목 등)을 절대 생성하지 마세요. 출력은 반드시 `### 🚨 [초동대응 핵심요약]` 제목부터 곧바로 시작해야 합니다.
+        3. 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 세력이 즉시 이해할 수 있는 명확한 개조식 문장으로 작성하세요.
+        4. 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하고, 물 반응성 물질 확인 시 직사주수 절대 금지 및 분무(안개) 주수 지침을 명시하세요.
+
+        --- 출력 형식을 엄격히 준수하세요 (수신/발신 헤더 일체 금지) ---
 
         ### 🚨 [초동대응 핵심요약]
 
@@ -943,50 +834,52 @@ def generate_gemini_vision_summary(chem_name, unno, cas_no, dgst_info, safety_in
         * **현장 초동 행동 수칙**: [풍상위치 확보, 사고유형 맞춤 행동, 직수금지/소화약제 및 사고선 비상조치 확인 지시]
 
         ---
-        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성
-        ### 2. 🛡️ 개인 보호구 및 초동 방제/소화 요령
-        ### 3. ⛔ 금지 행동 (금기 사항)
-        ### 4. 🏥 인체 노출 시 영향 및 긴급 응급조치
+        ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성 (유해액체물질 X/Y/Z류 및 해상 거동 포함)
+        ### 2. 🛡️ 현장 개인 보호구 및 초동 방제/소화 요령
+        ### 3. ⛔ 절대 금지 행동 (금기 사항)
+        ### 4. 🏥 인체 노출 시 신체 영향 및 긴급 응급조치
         """
 
-        # 멀티모달 입력 구성
-        contents_input = [prompt_text]
-        if hns_pil_image:
-            contents_input.append(hns_pil_image)
-        
-        for r_img in rag_images:
-            contents_input.append(r_img['pil_img'])
+    contents_input = [prompt_text]
+    if hns_pil_image:
+      contents_input.append(hns_pil_image)
 
-        for model_id in ['gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash']:
-            try:
-                response = client.models.generate_content(model=model_id, contents=contents_input)
-                return response.text
-            except Exception as ex:
-                print(f"{model_id} Vision 처리 시도 실패: {ex}")
-                continue
+    for r_img in rag_images:
+      contents_input.append(r_img['pil_img'])
 
-        return "⚠️ Gemini API 호출에 실패했습니다."
-    except Exception as e:
-        return f"Gemini API 클라이언트 생성 오류: {e}"
+    for model_id in [
+        'gemini-3.6-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.5-flash',
+    ]:
+      try:
+        response = client.models.generate_content(
+            model=model_id, contents=contents_input
+        )
+        return response.text
+      except Exception as ex:
+        print(f'{model_id} Vision 처리 시도 실패: {ex}')
+        continue
+
+    return '⚠️ Gemini API 호출에 실패했습니다.'
+  except Exception as e:
+    return f'Gemini API 클라이언트 생성 오류: {e}'
 
 
 # ==========================================
-# 4. 모달 팝업 및 UI 렌더링 함수
+# 4. 모달 팝업 및 UI 렌더링 함수 (화물반출입 정보 제거된 선박 제원 전용)
 # ==========================================
 
 
-@st.dialog('🚢 선박 제원 및 화물 반출입 상세정보', width='large')
-def show_vessel_detail_dialog(v, port_code):
+@st.dialog('🚢 선박 제원 및 상세정보', width='large')
+def show_vessel_detail_dialog(v):
+  """선박 제원 API 전용 모달 다이얼로그 (화물반출입 기능 전면 삭제)"""
   st.subheader(f"⚓ {v['vssl_nm']} (`{v['clsgn']}`)")
-  with st.spinner(
-      '해양수산부 API로부터 선박제원 및 화물반출입 정보를 수집 중...'
-  ):
-    spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
-    cargo_list = fetch_cargo_inout_api(
-        port_code, v['etrypt_year'], v['etrypt_co'], v['clsgn']
-    )
 
-  st.markdown('#### 📐 선박 제원 정보')
+  with st.spinner('해양수산부 API로부터 선박제원 스펙 정보를 수집 중...'):
+    spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+
+  st.markdown('#### 📐 선박 제원 스펙 정보')
   if spec_info:
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -1009,93 +902,8 @@ def show_vessel_detail_dialog(v, port_code):
   else:
     st.warning('💡 해당 선박의 제원 정보가 없거나 조회에 실패했습니다.')
 
-  st.divider()
 
-  st.markdown(f'#### 📦 화물 반출입 정보 (통합 수집: 총 {len(cargo_list)}건)')
-  if cargo_list:
-    for c_idx, c in enumerate(cargo_list):
-      with st.container(border=True):
-        st.caption(f"📌 구분: **{c['cargo_type']}**")
-        if c['cargo_type'] == '외항화물':
-          c1, c2, c3 = st.columns(3)
-          with c1:
-            st.write(f"- **계선장소명:** {c['laidupFcltyNm']}")
-            st.write(f"- **화물품목코드:** `{c['frghtPrdlstCd']}`")
-            st.write(f"- **화물품목한글명:** **{c['frghtPrdlstKorNm']}**")
-            st.write(f"- **UN.No:** `{c['unno'] if c['unno'] else '-'}`")
-            st.write(
-                f"- **화물분류 (코드/명):** {c['frghtClNm']}"
-                f" (`{c['frghtClCd']}`)"
-            )
-            st.write(f"- **위험물구분:** {c['dgstYn']}")
-          with c2:
-            st.write(f"- **입출항일시:** {c['etryndDt']}")
-            st.write(f"- **적하항구명:** {c['ldPrtNm']}")
-            st.write(f"- **신고일시:** {c['satmntDt']}")
-            st.write(f"- **포장종류명:** {c['packngKndNm']}")
-            st.write(f"- **하역업체명:** {c['lnlEntrpsNm']}")
-          with c3:
-            st.write(f"- **하역방법명:** {c['lnlMthNm']}")
-            st.write(f"- **중량톤:** {c['wtTon']} 톤")
-            st.write(f"- **기항지입항일시:** {c['aprtfEtryptDt']}")
-            st.write(f"- **선사명:** {c['spprnNm']}")
-            st.write(f"- **컨테이너수:** {c['contnCo']} 개")
-        else:
-          c1, c2, c3 = st.columns(3)
-          with c1:
-            st.write(f"- **입출항일시:** {c['etryndDt']}")
-            st.write(f"- **반입반출구분명:** {c['tkinTkoutNm']}")
-            st.write(f"- **계선장소명:** {c['laidupFcltyNm']}")
-            st.write(f"- **화물품목코드:** `{c['frghtPrdlstCd']}`")
-            st.write(f"- **화물품목명:** **{c['frghtPrdlstKorNm']}**")
-            st.write(f"- **화물품목영문명:** {c['frghtPrdlstEngNm']}")
-          with c2:
-            st.write(f"- **위험물적재유무:** {c['dgstLdadngYn']}")
-            st.write(
-                f"- **화물분류 (코드/명):** {c['frghtClNm']}"
-                f" (`{c['frghtClCd']}`)"
-            )
-            st.write(f"- **양적하항구명:** {c['lduldPrtNm']}")
-            st.write(f"- **중량톤:** {c['wtTon']} 톤")
-            st.write(f"- **신고일시:** {c['satmntDt']}")
-          with c3:
-            st.write(f"- **포장종류명:** {c['packngKndNm']}")
-            st.write(f"- **하역방법명:** {c['lnlMthNm']}")
-            st.write(f"- **기항지입항일시:** {c['aprtfEtryptDt']}")
-            st.write(f"- **하역업체명:** {c['lnlEntrpsNm']}")
-            st.write(f"- **추정 UN.No:** `{c['unno'] if c['unno'] else '-'}`")
-
-        target_unno = c.get('unno', '')
-        chem_query = c['frghtPrdlstKorNm']
-        if (
-            target_unno
-            or '위험물' in c.get('dgstLdadngYn', '')
-            or c.get('dgstYn') == '⚠️ 위험물(UN.No)'
-        ):
-          if st.button(
-              f'🤖 [{chem_query}] HNS AI 비상대응가이드 생성',
-              key=f'btn_cargo_ai_{c_idx}',
-              use_container_width=True,
-          ):
-            st.session_state['active_chem'] = chem_query
-            st.session_state['active_unno'] = (
-                target_unno if target_unno else '0000'
-            )
-            st.session_state['active_cas'] = '-'
-            st.session_state['active_ship'] = (
-                f"[{v['vssl_nm']}] 적재화물 ({chem_query})"
-            )
-            st.session_state['active_accident_context'] = (
-                f"{c['laidupFcltyNm']} 반출입 화물 사고"
-            )
-            st.session_state['active_summary'] = ''
-            st.session_state['active_key_changed'] = True
-            st.rerun()
-  else:
-    st.info('💡 해당 선박의 내항/외항 화물 반출입 신고 내역이 없습니다.')
-
-
-def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
+def render_vessel_item_card(v, port_code, de_gb, idx):
   expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
 
   with st.expander(expander_label, expanded=False):
@@ -1137,35 +945,42 @@ def render_vessel_item_card(v, port_name, port_code, de_gb, idx):
 
     st.markdown('---')
     if st.button(
-        f"🔍 [{v['vssl_nm']}] 선박제원 및 화물반출입정보 조회",
+        f"🔍 [{v['vssl_nm']}] 선박제원 상세정보 조회",
         key=f'btn_spec_{port_code}_{de_gb}_{idx}',
         use_container_width=True,
     ):
-      show_vessel_detail_dialog(v, port_code)
+      show_vessel_detail_dialog(v)
 
 
-def render_vessel_tab_content(port_name, port_code, de_gb):
-  gb_title = '입항' if de_gb == 'I' else '출항'
+def render_combined_port_tab_content(port_name, port_code):
+  """입항과 출항 구분을 통합한 항만별 선박 입출항 현황 렌더러"""
   now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
   today_date = now_kst.date()
 
-  c_date1, c_date2, c_btn = st.columns([0.35, 0.35, 0.3])
+  # 상단 컨트롤러: 입출항 구분 라디오 버튼 + 날짜 입력
+  c_gb, c_date1, c_date2, c_btn = st.columns([0.2, 0.25, 0.25, 0.3])
+  with c_gb:
+    de_gb = st.radio(
+        '입/출항 구분',
+        options=['I', 'O'],
+        format_func=lambda x: '📥 입항' if x == 'I' else '📤 출항',
+        key=f'gb_radio_{port_code}',
+    )
   with c_date1:
     start_date = st.date_input(
-        '조회 시작일', value=today_date, key=f'sdate_{port_code}_{de_gb}'
+        '조회 시작일', value=today_date, key=f'sdate_{port_code}'
     )
   with c_date2:
     end_date = st.date_input(
-        '조회 종료일', value=today_date, key=f'edate_{port_code}_{de_gb}'
+        '조회 종료일', value=today_date, key=f'edate_{port_code}'
     )
   with c_btn:
     st.markdown('<br>', unsafe_allow_html=True)
     query_trigger = st.button(
-        '🔍 조회',
-        key=f'search_btn_{port_code}_{de_gb}',
-        use_container_width=True,
+        '🔍 조회', key=f'search_btn_{port_code}', use_container_width=True
     )
 
+  gb_title = '입항' if de_gb == 'I' else '출항'
   state_key_fetched = f'fetched_{port_code}_{de_gb}'
 
   if query_trigger:
@@ -1174,8 +989,8 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
 
   if not st.session_state.get(state_key_fetched, False):
     st.info(
-        f'💡 날짜 설정 후 우측의 **[🔍 조회]** 버튼을 클릭하면 {port_name}'
-        f' {gb_title} 신고 선박 정보가 조회됩니다.'
+        f'💡 날짜 및 입/출항 선택 후 우측의 **[🔍 조회]** 버튼을 클릭하면'
+        f' {port_name} {gb_title} 신고 선박 정보가 조회됩니다.'
     )
     return
 
@@ -1220,18 +1035,15 @@ def render_vessel_tab_content(port_name, port_code, de_gb):
 
   if selected_option == ALL_VIEW_OPTION:
     for idx, v in enumerate(vessels):
-      render_vessel_item_card(v, port_name, port_code, de_gb, f'all_{idx}')
+      render_vessel_item_card(v, port_code, de_gb, f'all_{idx}')
   else:
     selected_idx = select_options.index(selected_option) - 1
     if 0 <= selected_idx < len(vessels):
       selected_vessel = vessels[selected_idx]
       render_vessel_item_card(
-          selected_vessel,
-          port_name,
-          port_code,
-          de_gb,
-          f'single_{selected_idx}',
+          selected_vessel, port_code, de_gb, f'single_{selected_idx}'
       )
+
 
 # ==========================================
 # 5. 메인 화면 구성 (Hero Section & 로고 정렬)
@@ -1242,9 +1054,9 @@ if kcg_logo_b64:
     <div class="hero-container">
         <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 6px;">
             <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
-            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
+            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템 (Vision)</div>
         </div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 원본 스캔 이미지, HNS 대응가이드) + Gemini Vision AI</div>
     </div>
     """,
       unsafe_allow_html=True,
@@ -1253,8 +1065,8 @@ else:
   st.markdown(
       """
     <div class="hero-container">
-        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템</div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템 (Vision)</div>
+        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 원본 스캔 이미지, HNS 대응가이드) + Gemini Vision AI</div>
     </div>
     """,
       unsafe_allow_html=True,
@@ -1325,8 +1137,11 @@ if 'active_chem' in st.session_state:
   st.error(status_header)
 
   st.caption(
-        "⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS 정보집, HNS 대응가이드를 통합한 Gemini RAG(검색증강생성) 모델로 AI 환각 현상을 최소화했습니다. **단, 현장 상황은 가이드와 다를 수 있으므로 반드시 재확인하시기 바랍니다.**"
-    )
+      '⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS'
+      ' 정보집 스캔 이미지 DB, HNS 대응가이드를 통합한 Gemini Vision'
+      ' 모델로 AI 환각 현상을 최소화했습니다. **단, 현장 상황 및 실제 실물'
+      ' 가이드와 다를 수 있으므로 반드시 현장에서 재확인하시기 바랍니다.**'
+  )
 
   if (
       'active_summary' not in st.session_state
@@ -1334,39 +1149,34 @@ if 'active_chem' in st.session_state:
       or not st.session_state['active_summary']
   ):
     with st.spinner(
-        '공공 API + HNS 정보집 + HNS 대응가이드 Gemini AI 종합 분석 중...'
+        'HNS 정보집 PDF + 대응가이드 PDF 이미지 렌더링 및 Gemini Vision 종합'
+        ' 분석 중...'
     ):
       dgst_info = fetch_dgst_info(unno)
       safety_info = fetch_chem_safety_info(cas)
       kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
 
-      # 기존: pil_image, page_no = get_hns_page_image(unno if unno != "0000" else chem)
-      # 변경: CAS번호(cas)를 2차 검색 조건으로 함께 전달
-      pil_image, page_no = get_hns_page_image(unno if unno != "0000" else chem, cas_no=cas)
+      # 1. HNS 정보집 원본 스캔 이미지 1장 렌더링 (1순위 CAS, 2순위 UNNO)
+      pil_image, page_no = get_hns_page_image(
+          unno if unno != '0000' else chem, cas_no=cas
+      )
 
-      # 💡 1단계: 수집된 위험물 정보(dgst_info)와 사고 상황(accident_ctx)을 결합하여 고도화된 RAG 쿼리 생성
-      hazard_kind = dgst_info.get('kndNm', '') # 예: 물반응성물질, 인화성액체 등
-      em_s = dgst_info.get('emergManagtCd', '') # 예: F-E, S-D (EmS 지침 코드)
-      
-      # 사고 상황 키워드 추출 (화재, 폭발, 유출, 침수 등)
-      situation_keyword = accident_ctx if accident_ctx else "해상 화재 및 유출 복합사고"
-      
-      # RAG 검색 전용 의미론적(Semantic) 질의어 조합
+      # 2. RAG 대응가이드 지능형 검색 쿼리 조합 (성상 + EmS + 사고 상황)
+      hazard_kind = dgst_info.get('kndNm', '')
+      em_s = dgst_info.get('emergManagtCd', '')
+      situation_keyword = (
+          accident_ctx if accident_ctx else '해상 화재 및 유출 복합사고'
+      )
+
       rag_search_query = (
-          f"위험유해물질 HNS {chem} "
-          f"성상 분류 {hazard_kind} "
-          f"비상대응지침 EmS {em_s} "
-          f"상황별 방제조치 및 안전거리 이격지침 {situation_keyword}"
+          f'위험유해물질 HNS {chem} 성상 분류 {hazard_kind} 비상대응지침'
+          f' EmS {em_s} 상황별 방제조치 및 안전거리 이격지침'
+          f' {situation_keyword}'
       )
-      
-      # 디버깅용 로그 (터미널에서 어떤 쿼리로 검색되는지 확인용)
-      print(f"🔍 [RAG 고도화 쿼리]: {rag_search_query}")
 
-      # 2. 고도화된 쿼리로 RAG 대응가이드 검색 텍스트 + 연관 이미지 렌더링
       rag_text, rag_images = fetch_rag_context_and_images(
-          rag_search_query, k=10
+          rag_search_query, k=5
       )
-
 
       st.session_state['active_source_data'] = {
           'dgst': dgst_info,
@@ -1374,7 +1184,7 @@ if 'active_chem' in st.session_state:
           'hns_image': pil_image,
           'hns_page_no': page_no,
           'rag_text': rag_text,
-          'rag_images': rag_images,  # RAG 원본 스캔 이미지 세트 보관
+          'rag_images': rag_images,
           'kosha': kosha_msds_text,
       }
 
@@ -1396,7 +1206,7 @@ if 'active_chem' in st.session_state:
   st.markdown(st.session_state['active_summary'])
 
   # ------------------------------------------
-  # 📚 활용 원본 자료 확인 탭 (스캔 이미지 뷰어 제공)
+  # 📚 활용 원본 자료 확인 탭 (진짜 스캔 이미지 뷰어 제공)
   # ------------------------------------------
   if 'active_source_data' in st.session_state:
     src = st.session_state['active_source_data']
@@ -1406,20 +1216,20 @@ if 'active_chem' in st.session_state:
       t1, t2, t3, t4, t5 = st.tabs([
           '🚢 해수부 위험물정보',
           '🛡️ 화학물질안전원',
-          '🖼️ 해경 HNS 정보집',
+          '🖼️ 해경 HNS 정보집 원본',
           '🧠 해경 HNS 대응가이드',
           '🏥 안전보건공단 MSDS',
       ])
 
       with t1:
-        st.markdown("**[해양수산부 위험물정보 API]**")
+        st.markdown('**[해양수산부 위험물정보 API]**')
         d = src.get('dgst', {})
-        # 💡 [수정] f-string 따옴표 닫기 연산 오류 수정
         st.write(
             f"- **IMDG 한글/영문명:** {d.get('imdgNm', '-')} ({d.get('imdgEngNm', '-')})"
         )
         st.write(
-            f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} / {d.get('kndNm', '-')}"
+            f"- **IMDG 등급 / 종류:** {d.get('imdgGradCd', '-')} /"
+            f" {d.get('kndNm', '-')}"
         )
         st.write(f"- **비상조치코드(EmS):** {d.get('emergManagtCd', '-')}")
         st.write(f"- **선박 적재방법:** {d.get('ldadngMth', '-')}")
@@ -1435,7 +1245,7 @@ if 'active_chem' in st.session_state:
         st.write(f"- **기타 유의사항:** {s.get('etc', '-')}")
 
       with t3:
-        st.markdown('**[해양경찰청 HNS 정보집]**')
+        st.markdown('**[해양경찰청 HNS 정보집 실시간 PDF 원본 스캔]**')
         hns_img = src.get('hns_image')
         hns_pno = src.get('hns_page_no')
         if hns_img and hns_pno:
@@ -1454,7 +1264,7 @@ if 'active_chem' in st.session_state:
           )
 
       with t4:
-        st.markdown('**[해양경찰청 HNS 해양사고 대응 가이드]**')
+        st.markdown('**[해양경찰청 HNS 해양사고 대응 가이드 원본 스캔]**')
         rag_imgs = src.get('rag_images', [])
         if rag_imgs:
           for r_item in rag_imgs:
@@ -1497,25 +1307,14 @@ if 'active_chem' in st.session_state:
 st.divider()
 
 # ------------------------------------------
-# ⚓ 실시간 항만 선박 모니터링 (4개 탭 구분)
+# ⚓ 실시간 항만 선박 모니터링 (평택항 / 대산항 2개 탭)
 # ------------------------------------------
 st.markdown('### ⚓ 항만별 실시간 선박입출항현황 (PORT-MIS)')
 
-tab_pt_in, tab_pt_out, tab_ds_in, tab_ds_out = st.tabs([
-    '📥 평택항 입항 선박',
-    '📤 평택항 출항 선박',
-    '📥 대산항 입항 선박',
-    '📤 대산항 출항 선박',
-])
+tab_pt, tab_ds = st.tabs(['🚢 평택항 입출항 선박', '🚢 대산항 입출항 선박'])
 
-with tab_pt_in:
-  render_vessel_tab_content('평택항', '031', 'I')
+with tab_pt:
+  render_combined_port_tab_content('평택항', '031')
 
-with tab_pt_out:
-  render_vessel_tab_content('평택항', '031', 'O')
-
-with tab_ds_in:
-  render_vessel_tab_content('대산항', '300', 'I')
-
-with tab_ds_out:
-  render_vessel_tab_content('대산항', '300', 'O')
+with tab_ds:
+  render_combined_port_tab_content('대산항', '300')
