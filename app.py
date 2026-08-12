@@ -183,92 +183,98 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 
 
 # ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 (본문 물리 페이지 38~222 범위로 색인 제외)
+# 1. 🖼️ PDF 인덱스 맵 생성 (세션 상태 영구 저장으로 팝업 클릭 시 재로딩 완벽 차단)
 # ==========================================
 
-@st.cache_data
-def build_hns_pdf_index(pdf_path):
+@st.cache_data(show_spinner=False)
+def build_hns_pdf_index_once(pdf_path):
     """
-    HNS 정보집 PDF 본문 영역(물리 페이지 38~222)만 타겟팅하여 색인 페이지 제외
+    HNS 정보집 PDF 본문 영역(물리 페이지 38~222) 전수 스캔 매핑 (최초 1회만 캐싱)
     """
     if not os.path.exists(pdf_path):
         return []
 
     index_list = []
-    with pdfplumber.open(pdf_path) as pdf:
-        # 1~38페이지의 '물질 색인' 구역을 완전히 제외하고 본문 영역(38~222)만 탐색
-        start_idx = 38  # 물리 39페이지 (0-based)
-        end_idx = min(223, len(pdf.pages))  # 물리 223페이지까지 안전 커버
-        
-        for idx in range(start_idx, end_idx):
-            page = pdf.pages[idx]
-            text = page.extract_text() or ""
-            
-            if not text.strip():
-                continue
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            start_idx = 38   # 물리 39페이지 (0-based)
+            end_idx = min(223, len(pdf.pages)) # 물리 223페이지까지 커버
 
-            # UN번호 추출 정규식
-            unno_match = re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE) or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE) or re.search(r'(\d{4})', text)
-            unno = unno_match.group(1).strip() if unno_match else ""
-            
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
-            title = lines[0] if lines else ""
-            
-            synonym_match = re.search(r'유사명\s*[:\s]*([^\n]+)', text)
-            synonyms = synonym_match.group(1).strip() if synonym_match else ""
+            for idx in range(start_idx, end_idx):
+                page = pdf.pages[idx]
+                text = page.extract_text() or ""
 
-            index_list.append({
-                "page_index": idx,            # 0-based 물리 인덱스
-                "display_page_no": idx + 1,   # 1-based 물리 페이지 번호
-                "unno": unno,
-                "title": title,
-                "synonyms": synonyms,
-                "raw_text": text.upper()
-            })
+                if not text.strip():
+                    continue
+
+                # UN번호 추출
+                unno_match = re.search(r'UN\s*번호\s*[:\s]*(\d{4})', text, re.IGNORECASE) or re.search(r'UN\s*(\d{4})', text, re.IGNORECASE) or re.search(r'(\d{4})', text)
+                unno = unno_match.group(1).strip() if unno_match else ""
+
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                title = lines[0] if lines else ""
+
+                synonym_match = re.search(r'유사명\s*[:\s]*([^\n]+)', text)
+                synonyms = synonym_match.group(1).strip() if synonym_match else ""
+
+                index_list.append({
+                    "page_index": idx,            # 0-based 물리 인덱스
+                    "display_page_no": idx + 1,   # 1-based 물리 페이지 번호
+                    "unno": unno,
+                    "title": title,
+                    "synonyms": synonyms,
+                    "raw_text": text.upper()
+                })
+    except Exception as e:
+        print(f"PDF 인덱스 구축 중 에러: {e}")
+
     return index_list
 
-hns_pdf_index = build_hns_pdf_index(HNS_PDF_PATH)
+# 💡 세션 상태를 활용해 앱 기동 시 단 1회만 로딩
+if 'hns_pdf_index' not in st.session_state or not st.session_state['hns_pdf_index']:
+    with st.spinner("🚀 [최초 1회] HNS 정보집 PDF 인덱스를 세션에 등록 중..."):
+        st.session_state['hns_pdf_index'] = build_hns_pdf_index_once(HNS_PDF_PATH)
+
+hns_pdf_index = st.session_state['hns_pdf_index']
 
 
 def get_hns_page_image(unno_or_query, cas_no="-"):
     """
-    [본문 영역 내 개편된 순차 탐색 방식]
-    1차: CAS번호 일치 검색 (고유 화학식 기준 우선)
-    2차: UN번호 일치 검색
-    3차: 물질명 또는 유사명 포함 검색
-    4차: 페이지 전체 텍스트 내 포함 검색 (최후의 보루)
+    [4단계 순차 탐색 방식]
+    1차: CAS번호 일치 검색 ➔ 2차: UN번호 일치 ➔ 3차: 물질명 ➔ 4차: 전체 텍스트
     """
-    if not hns_pdf_index or not os.path.exists(HNS_PDF_PATH):
+    idx_list = st.session_state.get('hns_pdf_index', [])
+    if not idx_list or not os.path.exists(HNS_PDF_PATH):
         return None, None
 
     q = str(unno_or_query).strip().upper()
     q_cas = str(cas_no).strip()
     target_item = None
 
-    # 1차: CAS번호로 본문 내에서 먼저 찾기 (우선순위 상향)
+    # 1차: CAS번호로 찾기
     if not target_item and q_cas and q_cas not in ["-", "0000", "없음"]:
-        for item in hns_pdf_index:
+        for item in idx_list:
             if q_cas in item.get('raw_text', ''):
                 target_item = item
                 break
 
-    # 2차: UN번호로 본문 내에서 찾기
+    # 2차: UN번호로 찾기
     if not target_item and q.isdigit() and len(q) == 4:
-        for item in hns_pdf_index:
+        for item in idx_list:
             if item['unno'] == q:
                 target_item = item
                 break
 
     # 3차: 물질명 또는 유사명 매칭
     if not target_item and q:
-        for item in hns_pdf_index:
+        for item in idx_list:
             if q in item['title'].upper() or q in item['synonyms'].upper():
                 target_item = item
                 break
 
-    # 4차: 전체 텍스트 내 포함 검색 (최후의 보루)
+    # 4차: 전체 텍스트 내 포함 검색
     if not target_item and len(q) >= 2:
-        for item in hns_pdf_index:
+        for item in idx_list:
             if q in item['raw_text']:
                 target_item = item
                 break
