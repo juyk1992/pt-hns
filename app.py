@@ -178,7 +178,7 @@ st.markdown(
 
 PUBLIC_API_KEY = st.secrets.get('PUBLIC_API_KEY', '')
 GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
-
+AISSTREAM_API_KEY = st.secrets.get('AISSTREAM_API_KEY', '')
 
 # ==========================================
 # 1. 🖼️ PDF 인덱스 맵 생성 (세션 상태 영구 저장으로 팝업 클릭 시 재로딩 완벽 차단)
