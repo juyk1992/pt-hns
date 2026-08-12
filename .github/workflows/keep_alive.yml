@@ -1,0 +1,17 @@
+name: Keep Streamlit App Alive
+
+on:
+  schedule:
+    # 💡 15분마다 주기로 Ping 요청 전송 (UTC 기준)
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # 필요 시 GitHub 웹에서 수동 실행 가능
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit App
+        run: |
+          # 💡 아래 URL을 본인의 실제 Streamlit App URL로 수정하세요.
+          curl -s https://pt-hns.streamlit.app > /dev/null
+          echo "Successfully sent keep-alive ping to Streamlit App at $(date)"
