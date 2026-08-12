@@ -13,3 +13,6 @@ torchvision
 pdf2image
 Pillow
 pdfplumber
+websocket-client
+folium
+streamlit-folium
