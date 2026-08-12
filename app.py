@@ -872,42 +872,175 @@ def generate_gemini_vision_summary(
     return f'Gemini API 클라이언트 생성 오류: {e}'
 
 
+import json
+import websocket # websocket-client 패키지
+import folium
+from streamlit_folium import st_folium
+
+AISSTREAM_API_KEY = st.secrets.get("AISSTREAM_API_KEY", "")
+
 # ==========================================
-# 4. 모달 팝업 및 UI 렌더링 함수 (선박 제원 전용)
+# ⚓ AISStream WebSocket 실시간 위치 수신 모듈
 # ==========================================
 
+def fetch_aisstream_vessel_position(imo_no=None, mmsi=None, clsgn=None, timeout_sec=5):
+    """
+    AISStream WebSocket을 통해 지정된 선박(IMO / Callsign / MMSI)의 
+    최신 위경도, 속력(SOG), 침로(COG), 수신시각 정보를 수집합니다.
+    """
+    if not AISSTREAM_API_KEY:
+        return None
 
-@st.dialog('🚢 선박 제원 및 상세정보', width='large')
+    # 한국 해역 (평택/대산/서해안) 범주 Bounding Box 지정 (위도 34~38, 경도 124~129)
+    subscribe_message = {
+        "APIKey": AISSTREAM_API_KEY,
+        "BoundingBoxes": [[[34.0, 124.0], [38.0, 129.0]]]
+    }
+
+    # 특정 IMO/Callsign 필터링 적용
+    filters = []
+    if imo_no and imo_no not in ['-', '0000', '']:
+        try:
+            filters.append(int(imo_no))
+        except ValueError:
+            pass
+    if filters:
+        subscribe_message["FiltersShipMMSI"] = filters # AISStream 필터링 파라미터
+
+    position_data = None
+
+    def on_open(ws):
+        ws.send(json.dumps(subscribe_message))
+
+    def on_message(ws, message):
+        nonlocal position_data
+        try:
+            data = json.loads(message)
+            msg_type = data.get("MessageType")
+            metadata = data.get("MetaData", {})
+
+            # IMO 또는 Callsign 교차 검증
+            recv_imo = str(metadata.get("ShipName", "")).strip()
+            recv_clsgn = str(metadata.get("CallSign", "")).strip()
+
+            if msg_type == "PositionReport":
+                pos = data.get("Message", {}).get("PositionReport", {})
+                lat = pos.get("Latitude")
+                lon = pos.get("Longitude")
+                sog = pos.get("Sog", 0.0) # 속력 (Knots)
+                cog = pos.get("Cog", 0.0) # 침로 (True Heading/Course)
+                time_utc = metadata.get("time_utc", "")
+
+                position_data = {
+                    "lat": lat,
+                    "lon": lon,
+                    "sog": sog,
+                    "cog": cog,
+                    "time_utc": time_utc,
+                    "ship_name": metadata.get("ShipName", "-"),
+                    "mmsi": metadata.get("MMSI", "-")
+                }
+                ws.close() # 좌표를 수신하면 연결 종료
+        except Exception as e:
+            print(f"AISStream 파싱 에러: {e}")
+
+    def on_error(ws, error):
+        print(f"AISStream WebSocket 에러: {error}")
+
+    try:
+        ws = websocket.WebSocketApp(
+            "wss://stream.aisstream.io/v0/stream",
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error
+        )
+        # 지정된 초 동안만 위치 신호 대기
+        ws.run_forever(ping_timeout=timeout_sec)
+    except Exception as e:
+        print(f"AISStream 연결 에러: {e}")
+
+    return position_data
+
+
+# ==========================================
+# 🚢 모달 팝업: 선박 제원(좌) + AIS 지도 위치(우) 1:1 배치
+# ==========================================
+
+@st.dialog("🚢 선박 제원 및 실시간 AIS 위치 정보", width="large")
 def show_vessel_detail_dialog(v):
-  """선박 제원 API 전용 모달 다이얼로그"""
-  st.subheader(f"⚓ {v['vssl_nm']} (`{v['clsgn']}`)")
+    """
+    왼쪽: 선박 제원 스펙 표출
+    오른쪽: AISStream 기반 실시간 위치 지도(Folium) 및 속력/침로 정보 표출
+    """
+    st.subheader(f"⚓ {v['vssl_nm']} (`호출부호: {v['clsgn']}`)")
+    st.divider()
 
-  with st.spinner('해양수산부 API로부터 선박제원 스펙 정보를 수집 중...'):
-    spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+    col_left, col_right = st.columns([1, 1])
 
-  st.markdown('#### 📐 선박 제원 스펙 정보')
-  if spec_info:
-    c1, c2, c3 = st.columns(3)
-    with c1:
-      st.write(f"- **선박번호:** {spec_info['vsslNo']}")
-      st.write(f"- **IMO번호:** {spec_info['imoNo']}")
-      st.write(f"- **선박한글명:** {spec_info['vsslKorNm']}")
-      st.write(f"- **선박영문명:** {spec_info['vsslEngNm']}")
-      st.write(f"- **선박종류:** {spec_info['vsslKnd']}")
-    with c2:
-      st.write(f"- **선박국적:** {spec_info['vsslNlty']}")
-      st.write(f"- **총톤수:** {spec_info['grtg']} 톤")
-      st.write(f"- **선박총길이:** {spec_info['vsslTotLt']} m")
-      st.write(f"- **선박너비:** {spec_info['shdth']} m")
-      st.write(f"- **선박흘수:** {spec_info['vsslDrft']} m")
-    with c3:
-      st.write(f"- **선박깊이:** {spec_info['vsslDp']} m")
-      st.write(f"- **나용선구분:** {spec_info['brbtSeNm']}")
-      st.write(f"- **운항형태:** {spec_info['nvgShapNm']}")
-      st.write(f"- **선박건조일시:** {spec_info['vsslCnstrDt']}")
-  else:
-    st.warning('💡 해당 선박의 제원 정보가 없거나 조회에 실패했습니다.')
+    # ------------------------------------------
+    # 👈 [좌측]: 선박 제원 스펙 (해수부 API)
+    # ------------------------------------------
+    with col_left:
+        st.markdown("#### 📐 선박 제원 스펙 정보")
+        with st.spinner("해수부 API 선박제원 조회 중..."):
+            spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
 
+        if spec_info:
+            st.write(f"- **선박명(한/영):** {spec_info['vsslKorNm']} / {spec_info['vsslEngNm']}")
+            st.write(f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` / `{spec_info['imoNo']}`")
+            st.write(f"- **선종 / 국적:** {spec_info['vsslKnd']} / {spec_info['vsslNlty']}")
+            st.write(f"- **총톤수(GRT):** {spec_info['grtg']} 톤")
+            st.write(f"- **선박 길이×너비:** {spec_info['vsslTotLt']}m × {spec_info['shdth']}m")
+            st.write(f"- **흘수 / 깊이:** {spec_info['vsslDrft']}m / {spec_info['vsslDp']}m")
+            st.write(f"- **운항형태 / 나용선:** {spec_info['nvgShapNm']} / {spec_info['brbtSeNm']}")
+            st.write(f"- **건조일시:** {spec_info['vsslCnstrDt']}")
+        else:
+            st.warning("💡 해수부 API에 등록된 선박제원 스펙이 없습니다.")
+
+    # ------------------------------------------
+    # 👉 [우측]: 실시간 AIS 위치 지도 (AISStream)
+    # ------------------------------------------
+    with col_right:
+        st.markdown("#### 🛰️ 실시간 AIS 위치 및 지도")
+        
+        imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
+        
+        with st.spinner("AISStream 실시간 위치 신호 수신 중... (최대 5초)"):
+            ais_pos = fetch_aisstream_vessel_position(
+                imo_no=imo_number, 
+                clsgn=v['clsgn'], 
+                timeout_sec=5
+            )
+
+        if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
+            lat = ais_pos['lat']
+            lon = ais_pos['lon']
+            sog = ais_pos['sog']
+            cog = ais_pos['cog']
+            time_utc = ais_pos['time_utc']
+
+            st.success(f"📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)")
+            st.write(f"- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°")
+            st.write(f"- **최신 수신시각(UTC):** {time_utc}")
+
+            # Folium 지도 생성 및 마커 추가
+            m = folium.Map(location=[lat, lon], zoom_start=12)
+            folium.Marker(
+                [lat, lon],
+                popup=f"{v['vssl_nm']} ({sog}kts)",
+                tooltip=f"{v['vssl_nm']}",
+                icon=folium.Icon(color="red", icon="ship", prefix="fa")
+            ).add_to(m)
+
+            # 지도 렌더링
+            st_folium(m, height=320, use_container_width=True)
+        else:
+            st.info("💡 현재 해당 선박의 실시간 AIS 신호가 감지되지 않거나 정박/신호 오프라인 상태입니다.")
+            
+            # 기본 위치(평택/대산항 해역) 지도 표출
+            default_m = folium.Map(location=[36.98, 126.80], zoom_start=9)
+            st_folium(default_m, height=300, use_container_width=True)
+            
 
 def render_vessel_item_card(v, port_code, idx):
   expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
@@ -951,11 +1084,11 @@ def render_vessel_item_card(v, port_code, idx):
 
     st.markdown('---')
     if st.button(
-        f"🔍 [{v['vssl_nm']}] 선박제원 상세정보 조회",
+        f"🔍 [{v['vssl_nm']}] 선박제원 및 위치정보 조회",
         key=f'btn_spec_{port_code}_{idx}',
         use_container_width=True,
     ):
-      show_vessel_detail_dialog(v)
+        show_vessel_detail_dialog(v)
 
 
 def render_combined_port_tab_content(port_name, port_code):
