@@ -25,24 +25,6 @@ import streamlit as st
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
-# ⚡ [백그라운드 Keep-Alive] 앱 잠듦(Sleep) 자동 방지
-# ==========================================
-def keep_app_alive():
-  """Streamlit Cloud 수면 상태 전환 방지 (10분 주기 자가 요청 백그라운드 쓰레드)"""
-  while True:
-    time.sleep(600)  # 10분 마다 동작
-    try:
-      _ = datetime.now()
-    except Exception:
-      pass
-
-
-if 'keep_alive_started' not in st.session_state:
-  st.session_state['keep_alive_started'] = True
-  t = threading.Thread(target=keep_app_alive, daemon=True)
-  t.start()
-
-# ==========================================
 # 0. 로컬 이미지 및 PDF 파일 경로 설정
 # ==========================================
 KCG_LOGO_PATH = 'kcg_logo.png'
