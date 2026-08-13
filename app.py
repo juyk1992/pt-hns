@@ -1051,14 +1051,14 @@ def show_vessel_detail_dialog(v):
           )
         else:
           # IMO 번호 미기재 시 평택·대산항 해역 중심 MarineTraffic 지도 직접 연결
-          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:8'
+          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
           st.markdown(
               '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
               f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
           )
 
         # 기본 평택/대산항 지도 표시
-        default_m = folium.Map(location=[37.00, 126.60], zoom_start=11)
+        default_m = folium.Map(location=[37.00, 126.60], zoom_start=9)
         components.html(default_m._repr_html_(), height=260)
 
 def render_vessel_item_card(v, port_code, idx):
