@@ -1058,7 +1058,7 @@ def show_vessel_detail_dialog(v):
           )
 
         # 기본 평택/대산항 지도 표시
-        default_m = folium.Map(location=[37.00, 126.60], zoom_start=9)
+        default_m = folium.Map(location=[37.00, 126.60], zoom_start=10)
         components.html(default_m._repr_html_(), height=260)
 
 def render_vessel_item_card(v, port_code, idx):
