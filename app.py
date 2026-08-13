@@ -1035,7 +1035,7 @@ def show_vessel_detail_dialog(v):
             map_html = m._repr_html_()
             components.html(map_html, height=330)
         else:
-            st.info("💡 실시간 AIS 신호가 감지되지 않았습니다. (정박 중이거나 서해안 수신 범위를 벗어남)")
+            st.info("💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream)")
             
             # 서해/평택항 기본 위치 지도 표시 (Rerun 방지 HTML)
             default_m = folium.Map(location=[36.98, 126.80], zoom_start=10)
