@@ -1051,7 +1051,7 @@ def show_vessel_detail_dialog(v):
           )
         else:
           # IMO 번호 미기재 시 평택·대산항 해역 중심 MarineTraffic 지도 직접 연결
-          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
+          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:10'
           st.markdown(
               '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
               f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
