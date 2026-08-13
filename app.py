@@ -1003,50 +1003,63 @@ def show_vessel_detail_dialog(v):
     # 👉 [우측]: 실시간 AIS 위치 지도 (HTML 순수 렌더링)
     # ------------------------------------------
     with col_right:
-        st.markdown("#### 🛰️ 실시간 AIS 위치 및 지도")
-        imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
+      st.markdown('#### 🛰️ 실시간 AIS 위치 및 지도')
+      imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
 
-        with st.spinner("AISStream 신호 탐색 중..."):
-            ais_pos = fetch_aisstream_vessel_position(
-                vssl_nm=v['vssl_nm'],
-                clsgn=v['clsgn'],
-                imo_no=imo_number,
-                timeout_sec=3
-            )
+      with st.spinner('AISStream 신호 탐색 중...'):
+        ais_pos = fetch_aisstream_vessel_position(
+            vssl_nm=v['vssl_nm'],
+            clsgn=v['clsgn'],
+            imo_no=imo_number,
+            timeout_sec=3,
+        )
 
-        if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
-            lat, lon = ais_pos['lat'], ais_pos['lon']
-            sog, cog = ais_pos['sog'], ais_pos['cog']
-            time_utc = ais_pos['time_utc']
+      if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
+        lat, lon = ais_pos['lat'], ais_pos['lon']
+        sog, cog = ais_pos['sog'], ais_pos['cog']
+        time_utc = ais_pos['time_utc']
 
-            st.success(f"📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)")
-            st.write(f"- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°")
-            st.write(f"- **수신시각(UTC):** {time_utc}")
+        st.success(
+            f'📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)'
+        )
+        st.write(f'- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°')
+        st.write(f'- **수신시각(UTC):** {time_utc}')
 
-            m = folium.Map(location=[lat, lon], zoom_start=13)
-            folium.Marker(
-                [lat, lon],
-                popup=f"{v['vssl_nm']} ({sog}kts)",
-                tooltip=f"{v['vssl_nm']}",
-                icon=folium.Icon(color="red", icon="ship", prefix="fa")
-            ).add_to(m)
+        m = folium.Map(location=[lat, lon], zoom_start=13)
+        folium.Marker(
+            [lat, lon],
+            popup=f"{v['vssl_nm']} ({sog}kts)",
+            tooltip=f"{v['vssl_nm']}",
+            icon=folium.Icon(color='red', icon='ship', prefix='fa'),
+        ).add_to(m)
 
-            # 💡 components.html 사용으로 지도 이동/확대 시 Streamlit Rerun 차단
-            map_html = m._repr_html_()
-            components.html(map_html, height=330)
+        map_html = m._repr_html_()
+        components.html(map_html, height=280)
+      else:
+        st.info('💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream)')
+
+        # 1. PORT-MIS 신고 계선장소 표출
+        facility_nm = v.get('laidup_fclty_nm', '-')
+        st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
+
+        # 2. 🔗 MarineTraffic 외부 링크 스마트 분기
+        if imo_number and imo_number not in ['-', '0000', '없음', '']:
+          mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{imo_number}'
+          st.markdown(
+              f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {imo_number})"
+              f' 실시간 위치 상세 보기]({mt_link})**'
+          )
         else:
-          st.info(
-              '💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답'
-              ' 대기 중)'
+          # IMO 번호 미기재 시 평택·대산항 해역 중심 MarineTraffic 지도 직접 연결
+          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
+          st.markdown(
+              '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
+              f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
           )
 
-          # 💡 PORT-MIS에 등록된 신고 부두 명칭 전파
-          facility_nm = v.get('laidup_fclty_nm', '-')
-          st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
-
-          # 서해/평택항 기본 위치 지도 표시 (Rerun 방지 HTML)
-          default_m = folium.Map(location=[36.98, 126.80], zoom_start=10)
-          components.html(default_m._repr_html_(), height=310)
+        # 기본 평택/대산항 지도 표시
+        default_m = folium.Map(location=[37.00, 126.60], zoom_start=11)
+        components.html(default_m._repr_html_(), height=260)
 
 def render_vessel_item_card(v, port_code, idx):
   expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
