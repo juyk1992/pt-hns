@@ -1035,11 +1035,18 @@ def show_vessel_detail_dialog(v):
             map_html = m._repr_html_()
             components.html(map_html, height=330)
         else:
-            st.info("💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream)")
-            
-            # 서해/평택항 기본 위치 지도 표시 (Rerun 방지 HTML)
-            default_m = folium.Map(location=[36.98, 126.80], zoom_start=10)
-            components.html(default_m._repr_html_(), height=310)
+          st.info(
+              '💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답'
+              ' 대기 중)'
+          )
+
+          # 💡 PORT-MIS에 등록된 신고 부두 명칭 전파
+          facility_nm = v.get('laidup_fclty_nm', '-')
+          st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
+
+          # 서해/평택항 기본 위치 지도 표시 (Rerun 방지 HTML)
+          default_m = folium.Map(location=[36.98, 126.80], zoom_start=10)
+          components.html(default_m._repr_html_(), height=310)
 
 def render_vessel_item_card(v, port_code, idx):
   expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
