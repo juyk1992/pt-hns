@@ -1,17 +1,21 @@
-name: Keep Streamlit App Alive
+name: Keep Streamlit Alive with Empty Commit
 
 on:
   schedule:
-    # 💡 15분마다 주기로 Ping 요청 전송 (UTC 기준)
-    - cron: '*/15 * * * *'
-  workflow_dispatch: # 필요 시 GitHub 웹에서 수동 실행 가능
+    # 3시간마다 빈 커밋 생성 (GitHub cron 제약 고려)
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
 
 jobs:
-  ping:
+  keep-alive:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Streamlit App
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create empty commit to wake Streamlit
         run: |
-          # 💡 아래 URL을 본인의 실제 Streamlit App URL로 수정하세요.
-          curl -s https://pt-hns.streamlit.app > /dev/null
-          echo "Successfully sent keep-alive ping to Streamlit App at $(date)"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "Chore: Keep Streamlit App Alive [skip ci]"
+          git push
