@@ -1036,7 +1036,7 @@ def show_vessel_detail_dialog(v):
         map_html = m._repr_html_()
         components.html(map_html, height=280)
       else:
-        st.info('💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream)')
+        st.info('💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답 대기 중)')
 
         # 1. PORT-MIS 신고 계선장소 표출
         facility_nm = v.get('laidup_fclty_nm', '-')
