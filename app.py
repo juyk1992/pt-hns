@@ -741,9 +741,9 @@ def map_search_query_with_gemini(query_text):
         }}
         """
     for model_id in [
-        'gemini-3.6-flash',
         'gemini-3.5-flash-lite',
-        'gemini-3.5-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
     ]:
       try:
         response = client.models.generate_content(
