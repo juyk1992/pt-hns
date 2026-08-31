@@ -644,7 +644,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-# 💡 다중 선박 목록을 조회할 수 있도록 개선된 선박제원 API 함수
+# 💡 선박명(한글/영문) 및 MMSI 누락 방지 처리된 선박제원 API 함수
 @st.cache_data(ttl=300)
 def fetch_vessel_spec_list_api(query_str, max_results=50):
   """선박명 또는 호출부호로 검색하여 일치/포함되는 다중 선박 목록을 반환"""
@@ -677,12 +677,32 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
             break
 
           for item in items:
+            # 선명 한글/영문 필드 정밀 추출
+            kor_name = (
+                item.findtext('vsslKorNm')
+                or item.findtext('vsslNm')
+                or item.findtext('vssl_nm')
+                or '-'
+            ).strip()
+            eng_name = (
+                item.findtext('vsslEngNm')
+                or item.findtext('vssl_eng_nm')
+                or '-'
+            ).strip()
+
+            # 영문명이 '-' 또는 비어있으면 한글 선명을 대표명으로 설정
+            display_name = kor_name if kor_name != '-' else eng_name
+            if display_name == '-' and eng_name != '-':
+              display_name = eng_name
+
             spec = {
                 'vsslNo': (item.findtext('vsslNo') or '-').strip(),
                 'imoNo': (item.findtext('imoNo') or '-').strip(),
+                'mmsiNo': (item.findtext('mmsiNo') or '-').strip(),
                 'clsgn': (item.findtext('clsgn') or '-').strip(),
-                'vsslKorNm': (item.findtext('vsslKorNm') or '-').strip(),
-                'vsslEngNm': (item.findtext('vsslEngNm') or '-').strip(),
+                'vsslKorNm': kor_name,
+                'vsslEngNm': eng_name,
+                'displayName': display_name,
                 'vsslKnd': (item.findtext('vsslKnd') or '-').strip(),
                 'vsslNlty': (item.findtext('vsslNlty') or '-').strip(),
                 'grtg': (item.findtext('grtg') or '-').strip(),
@@ -719,7 +739,9 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
 
 def fetch_vessel_spec_api(clsgn, vssl_nm):
   """단일 선박 제원 상세 반환 (모달 팝업용)"""
-  specs = fetch_vessel_spec_list_api(clsgn) or fetch_vessel_spec_list_api(vssl_nm)
+  specs = fetch_vessel_spec_list_api(clsgn) or fetch_vessel_spec_list_api(
+      vssl_nm
+  )
   return specs[0] if specs else None
 
 
@@ -1002,6 +1024,8 @@ def show_vessel_detail_dialog(v):
           f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` /"
           f' `{spec_info["imoNo"]}`'
       )
+      if spec_info.get('mmsiNo') and spec_info.get('mmsiNo') != '-':
+        st.write(f"- **MMSI 번호:** `{spec_info['mmsiNo']}`")
       st.write(
           f"- **선종 / 국적:** {spec_info['vsslKnd']} / {spec_info['vsslNlty']}"
       )
@@ -1274,7 +1298,6 @@ with search_tab_chem:
         use_container_width=True,
     )
 
-  # 엔터 입력 또는 우측 검색 버튼 클릭 시 동작
   if search_input and (
       btn_chem_search
       or st.session_state.get('last_searched_query') != search_input
@@ -1315,20 +1338,20 @@ with search_tab_chem:
           st.rerun()
 
 # ------------------------------------------
-# [탭 2]: 선박 제원 및 위치 검색 (다중 선박 목록 선택 기능 완비)
+# [탭 2]: 선박 제원 및 위치 검색 (선명 표출 강화 및 버튼명 수정)
 # ------------------------------------------
 with search_tab_vssl:
   col_v1, col_v2 = st.columns([4, 1])
   with col_v1:
     vssl_query_input = st.text_input(
-        '선박명(한/영) 또는 호출부호를 입력하세요 (예: DAITOMO 7, 3E7524,'
-        ' PACIFIC):',
+        '선박명(한/영) 또는 호출부호를 입력하세요 (예: DAITOMO 7, 대형카훼리,'
+        ' 049034, PACIFIC):',
         key='vssl_direct_search_box',
     )
   with col_v2:
     st.markdown('<br>', unsafe_allow_html=True)
     btn_vssl_search = st.button(
-        '🔍 선박 검색',
+        '🔍 검색',  # 💡 버튼명 수정
         key='btn_direct_vssl_search',
         use_container_width=True,
     )
@@ -1342,7 +1365,7 @@ with search_tab_vssl:
       st.session_state['vssl_search_results'] = vssl_list
       st.session_state['vssl_search_keyword'] = clean_query
 
-  # 검색 결과가 세션에 있을 때 화면에 목록 표출
+  # 검색 결과 표출 영역
   if 'vssl_search_results' in st.session_state:
     results = st.session_state['vssl_search_results']
     kw = st.session_state.get('vssl_search_keyword', '')
@@ -1358,10 +1381,11 @@ with search_tab_vssl:
           ' (최대 50척 표출)'
       )
 
-      # 1. 단일 선택 드롭다운 필터
+      # 💡 선명(한글)이 정확하게 표시되도록 라벨 구성
       vssl_labels = [
-          f"🚢 [{s['vsslEngNm'] or s['vsslKorNm']}] 호출부호: {s['clsgn']} ｜"
-          f" IMO: {s['imoNo']} ｜ 국적: {s['vsslNlty']} ｜ 선종: {s['vsslKnd']}"
+          f"🚢 [{s['displayName']}] 호출부호: {s['clsgn']} ｜ MMSI:"
+          f" {s.get('mmsiNo', '-')} ｜ 국적: {s['vsslNlty']} ｜ 선종:"
+          f" {s['vsslKnd']}"
           for s in results
       ]
       selected_vessel_label = st.selectbox(
@@ -1370,7 +1394,6 @@ with search_tab_vssl:
           key='vssl_search_select_box',
       )
 
-      # 선택된 선박 인덱스 추출 후 조회 버튼 제공
       if selected_vessel_label:
         sel_idx = vssl_labels.index(selected_vessel_label)
         selected_spec = results[sel_idx]
@@ -1379,15 +1402,13 @@ with search_tab_vssl:
         col_btn1, _ = st.columns([2, 3])
         with col_btn1:
           if st.button(
-              f"🔍 [{selected_spec['vsslEngNm'] or selected_spec['vsslKorNm']}]"
-              ' 선박제원 및 실시간 위치 상세 보기',
+              f"🔍 [{selected_spec['displayName']}] 선박제원 및 실시간 위치"
+              ' 상세 보기',
               key='btn_open_searched_vessel_modal',
               use_container_width=True,
           ):
             dummy_vessel_obj = {
-                'vssl_nm': selected_spec.get('vsslEngNm')
-                or selected_spec.get('vsslKorNm')
-                or kw,
+                'vssl_nm': selected_spec['displayName'],
                 'clsgn': selected_spec.get('clsgn', kw).upper(),
                 'laidup_fclty_nm': '선박 직접 검색 결과',
             }
