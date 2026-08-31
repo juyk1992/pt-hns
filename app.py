@@ -5,19 +5,19 @@ import os
 import re
 import urllib3
 import xml.etree.ElementTree as ET
-
+import folium
 from google import genai
-
 # RAG Vector DB 연동 라이브러리
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 import pandas as pd
-
 # PDF 및 이미지 처리 라이브러리
 import pdfplumber
 from PIL import Image
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
+import websocket
 
 # SSL 경고창 비활성화
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -189,11 +189,6 @@ HNS_INDEX_JSON_PATH = 'hns_pdf_index.json'
 
 @st.cache_data(show_spinner=False)
 def get_hns_pdf_index(pdf_path):
-  """JSON 인덱스 파일이 존재하면 0.01초 만에 바로 읽어오고,
-
-  없을 경우에만 PDF를 전수 스캔하여 JSON 파일로 저장합니다.
-  """
-  # 1. 이미 파싱된 JSON 파일이 존재하는 경우 즉시 파일에서 로드 (속도 극대화)
   if os.path.exists(HNS_INDEX_JSON_PATH):
     try:
       with open(HNS_INDEX_JSON_PATH, 'r', encoding='utf-8') as f:
@@ -201,15 +196,14 @@ def get_hns_pdf_index(pdf_path):
     except Exception as e:
       print(f'JSON 인덱스 로드 실패, PDF 재스캔 진행: {e}')
 
-  # 2. JSON 파일이 없을 경우 PDF 파싱 진행
   if not os.path.exists(pdf_path):
     return []
 
   index_list = []
   try:
     with pdfplumber.open(pdf_path) as pdf:
-      start_idx = 38  # 물리 39페이지 (0-based)
-      end_idx = min(223, len(pdf.pages))  # 물리 223페이지까지 커버
+      start_idx = 38
+      end_idx = min(223, len(pdf.pages))
 
       for idx in range(start_idx, end_idx):
         page = pdf.pages[idx]
@@ -232,15 +226,14 @@ def get_hns_pdf_index(pdf_path):
         synonyms = synonym_match.group(1).strip() if synonym_match else ''
 
         index_list.append({
-            'page_index': idx,  # 0-based 물리 인덱스
-            'display_page_no': idx + 1,  # 1-based 물리 페이지 번호
+            'page_index': idx,
+            'display_page_no': idx + 1,
             'unno': unno,
             'title': title,
             'synonyms': synonyms,
             'raw_text': text.upper(),
         })
 
-    # 파싱 결과를 JSON 파일로 저장해 두어 다음부터는 0.01초 만에 불러옴
     with open(HNS_INDEX_JSON_PATH, 'w', encoding='utf-8') as f:
       json.dump(index_list, f, ensure_ascii=False, indent=2)
 
@@ -250,16 +243,11 @@ def get_hns_pdf_index(pdf_path):
   return index_list
 
 
-# 앱 구동 시 초고속 로딩 (최초 실행 때만 JSON 생성되며 이후로는 새로고침해도 0.01초 만에 로드됨)
 hns_pdf_index = get_hns_pdf_index(HNS_PDF_PATH)
 st.session_state['hns_pdf_index'] = hns_pdf_index
 
 
 def get_hns_page_image(unno_or_query, cas_no='-'):
-  """[4단계 순차 탐색 방식]
-
-  1차: CAS번호 일치 검색 ➔ 2차: UN번호 일치 ➔ 3차: 물질명 ➔ 4차: 전체 텍스트
-  """
   idx_list = st.session_state.get('hns_pdf_index', [])
   if not idx_list or not os.path.exists(HNS_PDF_PATH):
     return None, None
@@ -268,28 +256,24 @@ def get_hns_page_image(unno_or_query, cas_no='-'):
   q_cas = str(cas_no).strip()
   target_item = None
 
-  # 1차: CAS번호로 찾기
   if not target_item and q_cas and q_cas not in ['-', '0000', '없음']:
     for item in idx_list:
       if q_cas in item.get('raw_text', ''):
         target_item = item
         break
 
-  # 2차: UN번호로 찾기
   if not target_item and q.isdigit() and len(q) == 4:
     for item in idx_list:
       if item['unno'] == q:
         target_item = item
         break
 
-  # 3차: 물질명 또는 유사명 매칭
   if not target_item and q:
     for item in idx_list:
       if q in item['title'].upper() or q in item['synonyms'].upper():
         target_item = item
         break
 
-  # 4차: 전체 텍스트 내 포함 검색
   if not target_item and len(q) >= 2:
     for item in idx_list:
       if q in item['raw_text']:
@@ -332,7 +316,6 @@ kcg_vectorstore = load_kcg_vectorstore()
 
 
 def fetch_rag_context_and_images(query, k=5):
-  """RAG 검색 결과 텍스트와 함께 해당 페이지의 고화질 이미지 리스트를 반환"""
   if not kcg_vectorstore or not query:
     return 'RAG 가이드 데이터베이스 미생성', []
 
@@ -350,7 +333,6 @@ def fetch_rag_context_and_images(query, k=5):
         page_numbers.append(page_no)
       context_items.append(f'[대응가이드 {page_no}쪽 지침]\n{doc.page_content}')
 
-    # 🖼️ 해당 쪽수들을 대응가이드 PDF에서 고화질 이미지로 렌더링
     rag_images = []
     if os.path.exists(KCG_GUIDE_PDF_PATH):
       with pdfplumber.open(KCG_GUIDE_PDF_PATH) as pdf:
@@ -774,7 +756,6 @@ def generate_gemini_vision_summary(
     rag_images=[],
     accident_context='',
 ):
-  """[끝판왕 멀티모달 Gemini Vision 통합 생성] - 공문서 서식 제거 및 역할 분담 적용"""
   if not GEMINI_API_KEY:
     return '⚠️ Gemini API 키가 설정되지 않았습니다.'
 
@@ -885,184 +866,190 @@ def generate_gemini_vision_summary(
     return f'Gemini API 클라이언트 생성 오류: {e}'
 
 
-import streamlit.components.v1 as components
-import websocket
-import json
-import folium
-
 # ==========================================
 # ⚓ AISStream WebSocket 실시간 위치 수신 (개선형)
 # ==========================================
 
-def fetch_aisstream_vessel_position(vssl_nm="", clsgn="", imo_no="", timeout_sec=4):
-    """
-    AISStream WebSocket 연결 후 선박명/호출부호/IMO로 교차 매칭하여 실시간 위치 수집
-    """
-    if not AISSTREAM_API_KEY:
-        return None
 
-    # 서해안 전체 및 평택/대산항 넓은 해역 Bounding Box (위도 34~38.5, 경도 124~128.5)
-    subscribe_message = {
-        "APIKey": AISSTREAM_API_KEY,
-        "BoundingBoxes": [[[34.0, 124.0], [38.5, 128.5]]]
-    }
+def fetch_aisstream_vessel_position(
+    vssl_nm='', clsgn='', imo_no='', timeout_sec=4
+):
+  if not AISSTREAM_API_KEY:
+    return None
 
-    position_data = None
-    target_nm = str(vssl_nm).strip().upper()
-    target_clsgn = str(clsgn).strip().upper()
-    target_imo = str(imo_no).strip()
+  subscribe_message = {
+      'APIKey': AISSTREAM_API_KEY,
+      'BoundingBoxes': [[[34.0, 124.0], [38.5, 128.5]]],
+  }
 
-    def on_open(ws):
-        ws.send(json.dumps(subscribe_message))
+  position_data = None
+  target_nm = str(vssl_nm).strip().upper()
+  target_clsgn = str(clsgn).strip().upper()
 
-    def on_message(ws, message):
-        nonlocal position_data
-        try:
-            data = json.loads(message)
-            msg_type = data.get("MessageType")
-            metadata = data.get("MetaData", {})
+  def on_open(ws):
+    ws.send(json.dumps(subscribe_message))
 
-            if msg_type == "PositionReport":
-                recv_ship_name = str(metadata.get("ShipName", "")).strip().upper()
-                recv_clsgn = str(metadata.get("CallSign", "")).strip().upper()
-                pos = data.get("Message", {}).get("PositionReport", {})
-
-                # 선박명, 호출부호 교차 매칭 검증
-                match_found = False
-                if target_clsgn and target_clsgn != '-' and target_clsgn == recv_clsgn:
-                    match_found = True
-                elif target_nm and target_nm != '-' and (target_nm in recv_ship_name or recv_ship_name in target_nm):
-                    match_found = True
-
-                if match_found:
-                    position_data = {
-                        "lat": pos.get("Latitude"),
-                        "lon": pos.get("Longitude"),
-                        "sog": pos.get("Sog", 0.0),
-                        "cog": pos.get("Cog", 0.0),
-                        "time_utc": metadata.get("time_utc", ""),
-                        "ship_name": metadata.get("ShipName", "-"),
-                        "mmsi": metadata.get("MMSI", "-")
-                    }
-                    ws.close()
-        except Exception as e:
-            print(f"AISStream 파싱 예외: {e}")
-
-    def on_error(ws, error):
-        print(f"AISStream 에러: {error}")
-
+  def on_message(ws, message):
+    nonlocal position_data
     try:
-        ws = websocket.WebSocketApp(
-            "wss://stream.aisstream.io/v0/stream",
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error
-        )
-        ws.run_forever(ping_timeout=timeout_sec)
-    except Exception as e:
-        print(f"AISStream 연결 실패: {e}")
+      data = json.loads(message)
+      msg_type = data.get('MessageType')
+      metadata = data.get('MetaData', {})
 
-    return position_data
+      if msg_type == 'PositionReport':
+        recv_ship_name = str(metadata.get('ShipName', '')).strip().upper()
+        recv_clsgn = str(metadata.get('CallSign', '')).strip().upper()
+        pos = data.get('Message', {}).get('PositionReport', {})
+
+        match_found = False
+        if target_clsgn and target_clsgn != '-' and target_clsgn == recv_clsgn:
+          match_found = True
+        elif (
+            target_nm
+            and target_nm != '-'
+            and (target_nm in recv_ship_name or recv_ship_name in target_nm)
+        ):
+          match_found = True
+
+        if match_found:
+          position_data = {
+              'lat': pos.get('Latitude'),
+              'lon': pos.get('Longitude'),
+              'sog': pos.get('Sog', 0.0),
+              'cog': pos.get('Cog', 0.0),
+              'time_utc': metadata.get('time_utc', ''),
+              'ship_name': metadata.get('ShipName', '-'),
+              'mmsi': metadata.get('MMSI', '-'),
+          }
+          ws.close()
+    except Exception as e:
+      print(f'AISStream 파싱 예외: {e}')
+
+  def on_error(ws, error):
+    print(f'AISStream 에러: {error}')
+
+  try:
+    ws = websocket.WebSocketApp(
+        'wss://stream.aisstream.io/v0/stream',
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+    )
+    ws.run_forever(ping_timeout=timeout_sec)
+  except Exception as e:
+    print(f'AISStream 연결 실패: {e}')
+
+  return position_data
 
 
 # ==========================================
 # 🚢 모달 팝업: 지도 이동 시 재로딩 완벽 방지 (HTML 컴포넌트 방식)
 # ==========================================
 
-@st.dialog("🚢 선박 제원 및 실시간 AIS 위치 정보", width="large")
+
+@st.dialog('🚢 선박 제원 및 실시간 AIS 위치 정보', width='large')
 def show_vessel_detail_dialog(v):
-    """
-    좌측: 선박 제원 스펙
-    우측: 지도 드래그/확대 시 화면 재실행(Rerun) 없는 Folium HTML 지도
-    """
-    st.subheader(f"⚓ {v['vssl_nm']} (`호출부호: {v['clsgn']}`)")
-    st.divider()
+  st.subheader(f"⚓ {v['vssl_nm']} (`호출부호: {v['clsgn']}`)")
+  st.divider()
 
-    col_left, col_right = st.columns([1, 1])
+  col_left, col_right = st.columns([1, 1])
 
-    # ------------------------------------------
-    # 👈 [좌측]: 선박 제원 스펙
-    # ------------------------------------------
-    with col_left:
-        st.markdown("#### 📐 선박 제원 스펙 정보")
-        spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+  with col_left:
+    st.markdown('#### 📐 선박 제원 스펙 정보')
+    spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
 
-        if spec_info:
-            st.write(f"- **선박명(한/영):** {spec_info['vsslKorNm']} / {spec_info['vsslEngNm']}")
-            st.write(f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` / `{spec_info['imoNo']}`")
-            st.write(f"- **선종 / 국적:** {spec_info['vsslKnd']} / {spec_info['vsslNlty']}")
-            st.write(f"- **총톤수(GRT):** {spec_info['grtg']} 톤")
-            st.write(f"- **선박 길이×너비:** {spec_info['vsslTotLt']}m × {spec_info['shdth']}m")
-            st.write(f"- **흘수 / 깊이:** {spec_info['vsslDrft']}m / {spec_info['vsslDp']}m")
-            st.write(f"- **운항형태 / 나용선:** {spec_info['nvgShapNm']} / {spec_info['brbtSeNm']}")
-            st.write(f"- **건조일시:** {spec_info['vsslCnstrDt']}")
-        else:
-            st.warning("💡 해수부 API에 등록된 선박제원 스펙이 없습니다.")
+    if spec_info:
+      st.write(
+          f"- **선박명(한/영):** {spec_info['vsslKorNm']} /"
+          f" {spec_info['vsslEngNm']}"
+      )
+      st.write(
+          f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` /"
+          f' `{spec_info["imoNo"]}`'
+      )
+      st.write(
+          f"- **선종 / 국적:** {spec_info['vsslKnd']} / {spec_info['vsslNlty']}"
+      )
+      st.write(f"- **총톤수(GRT):** {spec_info['grtg']} 톤")
+      st.write(
+          f"- **선박 길이×너비:** {spec_info['vsslTotLt']}m ×"
+          f' {spec_info["shdth"]}m'
+      )
+      st.write(
+          f"- **흘수 / 깊이:** {spec_info['vsslDrft']}m / {spec_info['vsslDp']}m"
+      )
+      st.write(
+          f"- **운항형태 / 나용선:** {spec_info['nvgShapNm']} /"
+          f' {spec_info["brbtSeNm"]}'
+      )
+      st.write(f"- **건조일시:** {spec_info['vsslCnstrDt']}")
+    else:
+      st.warning('💡 해수부 API에 등록된 선박제원 스펙이 없습니다.')
 
-    # ------------------------------------------
-    # 👉 [우측]: 실시간 AIS 위치 지도 (HTML 순수 렌더링)
-    # ------------------------------------------
-    with col_right:
-      st.markdown('#### 🛰️ 실시간 AIS 위치 및 지도')
-      imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
+  with col_right:
+    st.markdown('#### 🛰️ 실시간 AIS 위치 및 지도')
+    imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
 
-      with st.spinner('AISStream 신호 탐색 중...'):
-        ais_pos = fetch_aisstream_vessel_position(
-            vssl_nm=v['vssl_nm'],
-            clsgn=v['clsgn'],
-            imo_no=imo_number,
-            timeout_sec=3,
+    with st.spinner('AISStream 신호 탐색 중...'):
+      ais_pos = fetch_aisstream_vessel_position(
+          vssl_nm=v['vssl_nm'],
+          clsgn=v['clsgn'],
+          imo_no=imo_number,
+          timeout_sec=3,
+      )
+
+    if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
+      lat, lon = ais_pos['lat'], ais_pos['lon']
+      sog, cog = ais_pos['sog'], ais_pos['cog']
+      time_utc = ais_pos['time_utc']
+
+      st.success(
+          f'📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)'
+      )
+      st.write(f'- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°')
+      st.write(f'- **수신시각(UTC):** {time_utc}')
+
+      m = folium.Map(location=[lat, lon], zoom_start=13)
+      folium.Marker(
+          [lat, lon],
+          popup=f"{v['vssl_nm']} ({sog}kts)",
+          tooltip=f"{v['vssl_nm']}",
+          icon=folium.Icon(color='red', icon='ship', prefix='fa'),
+      ).add_to(m)
+
+      map_html = m._repr_html_()
+      components.html(map_html, height=280)
+    else:
+      st.info(
+          '💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답'
+          ' 대기 중)'
+      )
+
+      facility_nm = v.get('laidup_fclty_nm', '-')
+      st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
+
+      if imo_number and imo_number not in ['-', '0000', '없음', '']:
+        mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{imo_number}'
+        st.markdown(
+            f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {imo_number})"
+            f' 실시간 위치 상세 보기]({mt_link})**'
         )
-
-      if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
-        lat, lon = ais_pos['lat'], ais_pos['lon']
-        sog, cog = ais_pos['sog'], ais_pos['cog']
-        time_utc = ais_pos['time_utc']
-
-        st.success(
-            f'📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)'
-        )
-        st.write(f'- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°')
-        st.write(f'- **수신시각(UTC):** {time_utc}')
-
-        m = folium.Map(location=[lat, lon], zoom_start=13)
-        folium.Marker(
-            [lat, lon],
-            popup=f"{v['vssl_nm']} ({sog}kts)",
-            tooltip=f"{v['vssl_nm']}",
-            icon=folium.Icon(color='red', icon='ship', prefix='fa'),
-        ).add_to(m)
-
-        map_html = m._repr_html_()
-        components.html(map_html, height=280)
       else:
-        st.info('💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답 대기 중)')
+        mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
+        st.markdown(
+            '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
+            f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
+        )
 
-        # 1. PORT-MIS 신고 계선장소 표출
-        facility_nm = v.get('laidup_fclty_nm', '-')
-        st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
+      default_m = folium.Map(location=[37.00, 126.60], zoom_start=10)
+      components.html(default_m._repr_html_(), height=260)
 
-        # 2. 🔗 MarineTraffic 외부 링크 스마트 분기
-        if imo_number and imo_number not in ['-', '0000', '없음', '']:
-          mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{imo_number}'
-          st.markdown(
-              f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {imo_number})"
-              f' 실시간 위치 상세 보기]({mt_link})**'
-          )
-        else:
-          # IMO 번호 미기재 시 평택·대산항 해역 중심 MarineTraffic 지도 직접 연결
-          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
-          st.markdown(
-              '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
-              f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
-          )
-
-        # 기본 평택/대산항 지도 표시
-        default_m = folium.Map(location=[37.00, 126.60], zoom_start=10)
-        components.html(default_m._repr_html_(), height=260)
 
 def render_vessel_item_card(v, port_code, idx):
-  expander_label = f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
+  expander_label = (
+      f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종:"
+      f" {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
+  )
 
   with st.expander(expander_label, expanded=False):
     col1, col2, col3 = st.columns(3)
@@ -1107,11 +1094,10 @@ def render_vessel_item_card(v, port_code, idx):
         key=f'btn_spec_{port_code}_{idx}',
         use_container_width=True,
     ):
-        show_vessel_detail_dialog(v)
+      show_vessel_detail_dialog(v)
 
 
 def render_combined_port_tab_content(port_name, port_code):
-  """입항('I')과 출항('O') 데이터를 자동으로 통합 수집하여 표출하는 항만별 렌더러"""
   now_kst = datetime.now(timezone.utc) + timedelta(hours=9)
   today_date = now_kst.date()
 
@@ -1154,7 +1140,6 @@ def render_combined_port_tab_content(port_name, port_code):
   )
 
   with st.spinner(f'{port_name} 입항 및 출항 전체 선박 정보 통합 수집 중...'):
-    # 💡 입항('I')과 출항('O') 데이터를 연속으로 자동 호출하여 병합
     in_vessels = fetch_vessel_schedule_api(port_code, 'I', sde_str, ede_str)
     out_vessels = fetch_vessel_schedule_api(port_code, 'O', sde_str, ede_str)
     vessels = in_vessels + out_vessels
@@ -1193,7 +1178,9 @@ def render_combined_port_tab_content(port_name, port_code):
     selected_idx = select_options.index(selected_option) - 1
     if 0 <= selected_idx < len(vessels):
       selected_vessel = vessels[selected_idx]
-      render_vessel_item_card(selected_vessel, port_code, f'single_{selected_idx}')
+      render_vessel_item_card(
+          selected_vessel, port_code, f'single_{selected_idx}'
+      )
 
 
 # ==========================================
@@ -1223,50 +1210,101 @@ else:
       unsafe_allow_html=True,
   )
 
-# ------------------------------------------
-# 🔥 HNS AI 통합 검색창 (물질명 및 사고상황 자유 입력)
-# ------------------------------------------
-st.markdown('### 🔎 AI 통합검색 (화학물질 또는 사고상황 입력)')
-search_input = st.text_input(
-    '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예: 황산, H2SO4,'
-    ' LNG / 평택호 좌초로 질산 유출 중)',
-    key='global_search_box',
-)
+# ==========================================
+# 🔥 상단 통합 검색 시스템 (2개 탭 분기)
+# ==========================================
+st.markdown('### 🔎 통합 검색 시스템')
 
-if search_input:
-  with st.spinner('Gemini AI가 입력 내용을 지능형 분석 중...'):
-    mapped_result = map_search_query_with_gemini(search_input)
-    mapped_ko = mapped_result.get('chem_ko', search_input)
-    mapped_eng = mapped_result.get('chem_eng', search_input)
-    mapped_unno = str(mapped_result.get('unno', '0000')).zfill(4)
-    mapped_cas = str(mapped_result.get('cas_no', '-'))
-    accident_ctx = mapped_result.get('accident_context', '')
+search_tab_chem, search_tab_vssl = st.tabs([
+    '🧪 HNS 물질 및 사고상황 AI 검색',
+    '🚢 선박 제원 및 위치 직접 검색',
+])
 
-    c1, c2 = st.columns([4, 1])
-    with c1:
-      info_msg = (
-          f'💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN'
-          f' NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`'
-      )
-      if accident_ctx:
-        info_msg += f'\n ｜ 🚨 **사고상황 식별:** `{accident_ctx}`'
-      st.info(info_msg)
-    with c2:
-      if st.button(
-          '🤖 AI 가이드 생성',
-          key='btn_global_search',
-          use_container_width=True,
-      ):
-        st.session_state['active_chem'] = mapped_ko
-        st.session_state['active_unno'] = mapped_unno
-        st.session_state['active_cas'] = mapped_cas
-        st.session_state['active_ship'] = (
-            f"자유 통합 검색 ('{search_input}')"
+# ------------------------------------------
+# [탭 1]: 화학물질 및 사고상황 AI 검색
+# ------------------------------------------
+with search_tab_chem:
+  search_input = st.text_input(
+      '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예: 황산, H2SO4,'
+      ' LNG / 평택호 좌초로 질산 유출 중)',
+      key='global_search_box',
+  )
+
+  if search_input:
+    with st.spinner('Gemini AI가 입력 내용을 지능형 분석 중...'):
+      mapped_result = map_search_query_with_gemini(search_input)
+      mapped_ko = mapped_result.get('chem_ko', search_input)
+      mapped_eng = mapped_result.get('chem_eng', search_input)
+      mapped_unno = str(mapped_result.get('unno', '0000')).zfill(4)
+      mapped_cas = str(mapped_result.get('cas_no', '-'))
+      accident_ctx = mapped_result.get('accident_context', '')
+
+      c1, c2 = st.columns([4, 1])
+      with c1:
+        info_msg = (
+            f'💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN'
+            f' NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`'
         )
-        st.session_state['active_accident_context'] = accident_ctx
-        st.session_state['active_summary'] = ''
-        st.session_state['active_key_changed'] = True
-        st.rerun()
+        if accident_ctx:
+          info_msg += f'\n ｜ 🚨 **사고상황 식별:** `{accident_ctx}`'
+        st.info(info_msg)
+      with c2:
+        if st.button(
+            '🤖 AI 가이드 생성',
+            key='btn_global_search',
+            use_container_width=True,
+        ):
+          st.session_state['active_chem'] = mapped_ko
+          st.session_state['active_unno'] = mapped_unno
+          st.session_state['active_cas'] = mapped_cas
+          st.session_state['active_ship'] = (
+              f"자유 통합 검색 ('{search_input}')"
+          )
+          st.session_state['active_accident_context'] = accident_ctx
+          st.session_state['active_summary'] = ''
+          st.session_state['active_key_changed'] = True
+          st.rerun()
+
+# ------------------------------------------
+# [탭 2]: 선박명 / 호출부호 직접 검색
+# ------------------------------------------
+with search_tab_vssl:
+  col_v1, col_v2 = st.columns([4, 1])
+  with col_v1:
+    vssl_query_input = st.text_input(
+        '선박명(한/영) 또는 호출부호를 입력하세요 (예: DAITOMO 7, 3E7524,'
+        ' PACIFIC):',
+        key='vssl_direct_search_box',
+    )
+  with col_v2:
+    st.markdown('<br>', unsafe_allow_html=True)
+    btn_vssl_search = st.button(
+        '🔍 선박 조회',
+        key='btn_direct_vssl_search',
+        use_container_width=True,
+    )
+
+  if btn_vssl_search and vssl_query_input:
+    clean_query = vssl_query_input.strip()
+    with st.spinner(f"해수부 API 선박 정보 조회 중 ('{clean_query}')..."):
+      # 선박명 또는 호출부호로 선박제원 API 조회
+      found_spec = fetch_vessel_spec_api(clean_query, clean_query)
+
+      if found_spec:
+        # 가상 선박 데이터 생성 후 모달 표출
+        dummy_vessel_obj = {
+            'vssl_nm': found_spec.get('vsslEngNm')
+            or found_spec.get('vsslKorNm')
+            or clean_query,
+            'clsgn': clean_query.upper(),
+            'laidup_fclty_nm': '직접 검색 선박',
+        }
+        show_vessel_detail_dialog(dummy_vessel_obj)
+      else:
+        st.warning(
+            f"💡 '{clean_query}'에 해당하는 선박 정보를 해수부 선박제원 API에서"
+            ' 찾을 수 없습니다. 선박명 철자 또는 호출부호를 확인해주세요.'
+        )
 
 # ------------------------------------------
 # ⚡ AI 대응 가이드 출력 모달/컨테이너 (Vision 연동)
@@ -1306,12 +1344,10 @@ if 'active_chem' in st.session_state:
       safety_info = fetch_chem_safety_info(cas)
       kosha_msds_text = fetch_kosha_msds_info(chem, cas, unno)
 
-      # CAS번호(cas)를 1차 검색 조건으로 함께 전달
       pil_image, page_no = get_hns_page_image(
           unno if unno != '0000' else chem, cas_no=cas
       )
 
-      # 💡 수집된 위험물 정보(dgst_info)와 사고 상황(accident_ctx)을 결합하여 고도화된 RAG 쿼리 생성
       hazard_kind = dgst_info.get('kndNm', '')
       em_s = dgst_info.get('emergManagtCd', '')
       situation_keyword = (
