@@ -644,7 +644,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-# 💡 영문 선명 우선 + 한글 병기 로직이 적용된 다중 선박 API 함수
+# 💡 선박명(한글/영문) 정밀 분리 및 MMSI 수집 API 함수
 @st.cache_data(ttl=300)
 def fetch_vessel_spec_list_api(query_str, max_results=50):
   if not PUBLIC_API_KEY or not query_str:
@@ -676,19 +676,27 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
             break
 
           for item in items:
-            kor_name = (
-                item.findtext('vsslKorNm')
-                or item.findtext('vsslNm')
-                or item.findtext('vssl_nm')
-                or '-'
-            ).strip()
-            eng_name = (
-                item.findtext('vsslEngNm')
-                or item.findtext('vssl_eng_nm')
-                or '-'
-            ).strip()
+            raw_kor = (item.findtext('vsslKorNm') or '').strip()
+            raw_eng = (item.findtext('vsslEngNm') or '').strip()
+            fallback_nm = (item.findtext('vsslNm') or '').strip()
 
-            # 💡 영문 선명 우선 + 한글명 병기 규칙
+            # 한글/영문 필드 정밀 정리
+            kor_name = (
+                raw_kor
+                if raw_kor
+                else (fallback_nm if re.search(r'[가-힣]', fallback_nm) else '-')
+            )
+            eng_name = (
+                raw_eng
+                if raw_eng
+                else (
+                    fallback_nm
+                    if not re.search(r'[가-힣]', fallback_nm)
+                    else '-'
+                )
+            )
+
+            # 드롭다운 대표 표시명 생성 (영문 우선 + 한글 병기)
             if eng_name != '-' and kor_name != '-':
               if eng_name.upper() == kor_name.upper():
                 display_name = eng_name
@@ -1020,10 +1028,20 @@ def show_vessel_detail_dialog(v):
     spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
 
     if spec_info:
-      st.write(
-          f"- **선박명(한/영):** {spec_info['vsslKorNm']} /"
-          f" {spec_info['vsslEngNm']}"
-      )
+      kor_nm = spec_info.get('vsslKorNm', '-')
+      eng_nm = spec_info.get('vsslEngNm', '-')
+
+      # 💡 선박명(한/영) 표출 정돈 (중복 방지)
+      if kor_nm != '-' and eng_nm != '-' and kor_nm.upper() != eng_nm.upper():
+        name_str = f'{kor_nm} / {eng_nm}'
+      elif kor_nm != '-':
+        name_str = kor_nm
+      elif eng_nm != '-':
+        name_str = eng_nm
+      else:
+        name_str = v.get('vssl_nm', '-')
+
+      st.write(f'- **선박명(한/영):** {name_str}')
       st.write(
           f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` /"
           f' `{spec_info["imoNo"]}`'
@@ -1284,29 +1302,16 @@ search_tab_chem, search_tab_vssl = st.tabs([
 ])
 
 # ------------------------------------------
-# [탭 1]: 화학물질 및 사고상황 AI 검색
+# [탭 1]: 화학물질 및 사고상황 AI 검색 (안정화 복구)
 # ------------------------------------------
 with search_tab_chem:
-  col_c1, col_c2 = st.columns([4, 1])
-  with col_c1:
-    search_input = st.text_input(
-        '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예:'
-        ' 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중):',
-        key='global_search_box',
-    )
-  with col_c2:
-    st.markdown('<br>', unsafe_allow_html=True)
-    btn_chem_search = st.button(
-        '🔍 검색',
-        key='btn_trigger_chem_search',
-        use_container_width=True,
-    )
+  search_input = st.text_input(
+      '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예: 황산, H2SO4,'
+      ' LNG / 평택호 좌초로 질산 유출 중):',
+      key='global_search_box',
+  )
 
-  if search_input and (
-      btn_chem_search
-      or st.session_state.get('last_searched_query') != search_input
-  ):
-    st.session_state['last_searched_query'] = search_input
+  if search_input:
     with st.spinner('Gemini AI가 입력 내용을 지능형 분석 중...'):
       mapped_result = map_search_query_with_gemini(search_input)
       mapped_ko = mapped_result.get('chem_ko', search_input)
@@ -1342,7 +1347,7 @@ with search_tab_chem:
           st.rerun()
 
 # ------------------------------------------
-# [탭 2]: 선박 제원 및 위치 검색 (영문 우선 + 한글 병기)
+# [탭 2]: 선박 제원 및 위치 검색
 # ------------------------------------------
 with search_tab_vssl:
   col_v1, col_v2 = st.columns([4, 1])
@@ -1369,7 +1374,6 @@ with search_tab_vssl:
       st.session_state['vssl_search_results'] = vssl_list
       st.session_state['vssl_search_keyword'] = clean_query
 
-  # 검색 결과 표출 영역
   if 'vssl_search_results' in st.session_state:
     results = st.session_state['vssl_search_results']
     kw = st.session_state.get('vssl_search_keyword', '')
@@ -1385,7 +1389,6 @@ with search_tab_vssl:
           ' (최대 50척 표출)'
       )
 
-      # 💡 영문 선명 우선 + 한글 병기 라벨
       vssl_labels = [
           f"🚢 [{s['displayName']}] 호출부호: {s['clsgn']} ｜ MMSI:"
           f" {s.get('mmsiNo', '-')} ｜ 국적: {s['vsslNlty']} ｜ 선종:"
