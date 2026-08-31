@@ -315,6 +315,7 @@ def load_kcg_vectorstore():
 kcg_vectorstore = load_kcg_vectorstore()
 
 
+# 💡 가이드 참고 페이지를 5페이지로 최적화 (시간 단축)
 def fetch_rag_context_and_images(query, k=5):
   if not kcg_vectorstore or not query:
     return 'RAG 가이드 데이터베이스 미생성', []
@@ -644,7 +645,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-# 💡 선박명(한글/영문) 정밀 분리 및 MMSI 수집 API 함수
+# 💡 가이드 문서 명세(vsslKorNm, vsslEngNm)를 100% 반영한 다중 선박 API 함수[cite: 6]
 @st.cache_data(ttl=300)
 def fetch_vessel_spec_list_api(query_str, max_results=50):
   if not PUBLIC_API_KEY or not query_str:
@@ -676,27 +677,11 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
             break
 
           for item in items:
-            raw_kor = (item.findtext('vsslKorNm') or '').strip()
-            raw_eng = (item.findtext('vsslEngNm') or '').strip()
-            fallback_nm = (item.findtext('vsslNm') or '').strip()
+            # 💡 가이드 문서 명세 표준 태그 파싱[cite: 6]
+            kor_name = (item.findtext('vsslKorNm') or '').strip() or '-'
+            eng_name = (item.findtext('vsslEngNm') or '').strip() or '-'
 
-            # 한글/영문 필드 정밀 정리
-            kor_name = (
-                raw_kor
-                if raw_kor
-                else (fallback_nm if re.search(r'[가-힣]', fallback_nm) else '-')
-            )
-            eng_name = (
-                raw_eng
-                if raw_eng
-                else (
-                    fallback_nm
-                    if not re.search(r'[가-힣]', fallback_nm)
-                    else '-'
-                )
-            )
-
-            # 드롭다운 대표 표시명 생성 (영문 우선 + 한글 병기)
+            # 영문/한글 병기 표시명 구성
             if eng_name != '-' and kor_name != '-':
               if eng_name.upper() == kor_name.upper():
                 display_name = eng_name
@@ -710,29 +695,33 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
               display_name = '-'
 
             spec = {
-                'vsslNo': (item.findtext('vsslNo') or '-').strip(),
-                'imoNo': (item.findtext('imoNo') or '-').strip(),
-                'mmsiNo': (item.findtext('mmsiNo') or '-').strip(),
-                'clsgn': (item.findtext('clsgn') or '-').strip(),
+                'vsslNo': (item.findtext('vsslNo') or '').strip() or '-',
+                'imoNo': (item.findtext('imoNo') or '').strip() or '-',
+                'mmsiNo': (item.findtext('mmsiNo') or '').strip() or '-',
+                'clsgn': (item.findtext('clsgn') or '').strip() or '-',
                 'vsslKorNm': kor_name,
                 'vsslEngNm': eng_name,
                 'displayName': display_name,
-                'vsslKnd': (item.findtext('vsslKnd') or '-').strip(),
-                'vsslNlty': (item.findtext('vsslNlty') or '-').strip(),
-                'grtg': (item.findtext('grtg') or '-').strip(),
-                'vsslTotLt': (item.findtext('vsslTotLt') or '-').strip(),
-                'shdth': (item.findtext('shdth') or '-').strip(),
-                'vsslDrft': (item.findtext('vsslDrft') or '-').strip(),
-                'vsslDp': (item.findtext('vsslDp') or '-').strip(),
-                'brbtSeNm': (item.findtext('brbtSeNm') or '-').strip(),
-                'nvgShapNm': (item.findtext('nvgShapNm') or '-').strip(),
+                'vsslKnd': (item.findtext('vsslKnd') or '').strip() or '-',
+                'vsslNlty': (item.findtext('vsslNlty') or '').strip() or '-',
+                'grtg': (item.findtext('grtg') or '').strip() or '-',
+                'vsslTotLt': (item.findtext('vsslTotLt') or '').strip() or '-',
+                'shdth': (item.findtext('shdth') or '').strip() or '-',
+                'vsslDrft': (item.findtext('vsslDrft') or '').strip() or '-',
+                'vsslDp': (item.findtext('vsslDp') or '').strip() or '-',
+                'brbtSeNm': (item.findtext('brbtSeNm') or '').strip() or '-',
+                'nvgShapNm': (item.findtext('nvgShapNm') or '').strip() or '-',
                 'vsslCnstrDt': (
                     (item.findtext('vsslCnstrDt') or '-')
                     .strip()
                     .replace('T', ' ')
                 ),
             }
-            if not any(r['vsslNo'] == spec['vsslNo'] for r in results):
+            if not any(
+                r['clsgn'] == spec['clsgn']
+                and r['vsslKorNm'] == spec['vsslKorNm']
+                for r in results
+            ):
               results.append(spec)
 
           if len(items) < 50:
@@ -758,7 +747,7 @@ def fetch_vessel_spec_api(clsgn, vssl_nm):
 
 
 # ==========================================
-# 3. 🧠 Gemini Vision 멀티모달 프롬프트 연동
+# 3. 🧠 Gemini Vision 멀티모달 프롬프트 연동 (우선순위: 3.7 -> 3.6 -> 3.5)
 # ==========================================
 
 
@@ -791,10 +780,11 @@ def map_search_query_with_gemini(query_text):
             "accident_context": "사고 상황 요약 문장 또는 빈값"
         }}
         """
+    # 💡 우선순위 변경: 3.7 -> 3.6 -> 3.5
     for model_id in [
-        'gemini-3.5-flash-lite',
         'gemini-3.7-flash',
         'gemini-3.6-flash',
+        'gemini-3.5-flash-lite',
     ]:
       try:
         response = client.models.generate_content(
@@ -916,10 +906,11 @@ def generate_gemini_vision_summary(
     for r_img in rag_images:
       contents_input.append(r_img['pil_img'])
 
+    # 💡 우선순위 변경: 3.7 -> 3.6 -> 3.5
     for model_id in [
+        'gemini-3.7-flash',
         'gemini-3.6-flash',
         'gemini-3.5-flash-lite',
-        'gemini-3.5-flash',
     ]:
       try:
         response = client.models.generate_content(
@@ -1031,15 +1022,19 @@ def show_vessel_detail_dialog(v):
       kor_nm = spec_info.get('vsslKorNm', '-')
       eng_nm = spec_info.get('vsslEngNm', '-')
 
-      # 💡 선박명(한/영) 표출 정돈 (중복 방지)
-      if kor_nm != '-' and eng_nm != '-' and kor_nm.upper() != eng_nm.upper():
-        name_str = f'{kor_nm} / {eng_nm}'
+      # 💡 선박명(한/영) 포맷 통일: 둘 다 있거나 한쪽만 있을 때 정확히 표출[cite: 6]
+      if kor_nm != '-' and eng_nm != '-':
+        name_str = (
+            f'{kor_nm} / {eng_nm}'
+            if kor_nm.upper() != eng_nm.upper()
+            else f'{kor_nm} / {eng_nm}'
+        )
       elif kor_nm != '-':
-        name_str = kor_nm
+        name_str = f'{kor_nm} / -'
       elif eng_nm != '-':
-        name_str = eng_nm
+        name_str = f'- / {eng_nm}'
       else:
-        name_str = v.get('vssl_nm', '-')
+        name_str = f"{v.get('vssl_nm', '-')} / -"
 
       st.write(f'- **선박명(한/영):** {name_str}')
       st.write(
@@ -1302,68 +1297,78 @@ search_tab_chem, search_tab_vssl = st.tabs([
 ])
 
 # ------------------------------------------
-# [탭 1]: 화학물질 및 사고상황 AI 검색 (안정화 복구)
+# [탭 1]: 화학물질 및 사고상황 AI 검색 (Form 기반 안정화 + 검색 버튼)
 # ------------------------------------------
 with search_tab_chem:
-  search_input = st.text_input(
-      '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예: 황산, H2SO4,'
-      ' LNG / 평택호 좌초로 질산 유출 중):',
-      key='global_search_box',
-  )
+  with st.form(key='chem_search_form', clear_on_submit=False):
+    col_c1, col_c2 = st.columns([4, 1])
+    with col_c1:
+      search_input_val = st.text_input(
+          '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예:'
+          ' 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중):',
+          key='global_search_box_input',
+      )
+    with col_c2:
+      st.markdown('<br>', unsafe_allow_html=True)
+      submit_chem_search = st.form_submit_button(
+          '🔍 검색', use_container_width=True
+      )
 
-  if search_input:
+  if submit_chem_search and search_input_val:
+    st.session_state['active_search_query'] = search_input_val.strip()
+
+  # 💡 검색된 질의가 있을 때 AI 매핑 결과와 가이드 생성 버튼을 항상 안정적으로 노출
+  curr_q = st.session_state.get('active_search_query', '')
+  if curr_q:
     with st.spinner('Gemini AI가 입력 내용을 지능형 분석 중...'):
-      mapped_result = map_search_query_with_gemini(search_input)
-      mapped_ko = mapped_result.get('chem_ko', search_input)
-      mapped_eng = mapped_result.get('chem_eng', search_input)
+      mapped_result = map_search_query_with_gemini(curr_q)
+      mapped_ko = mapped_result.get('chem_ko', curr_q)
+      mapped_eng = mapped_result.get('chem_eng', curr_q)
       mapped_unno = str(mapped_result.get('unno', '0000')).zfill(4)
       mapped_cas = str(mapped_result.get('cas_no', '-'))
       accident_ctx = mapped_result.get('accident_context', '')
 
-      c1, c2 = st.columns([4, 1])
-      with c1:
-        info_msg = (
-            f'💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN'
-            f' NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`'
-        )
-        if accident_ctx:
-          info_msg += f'\n ｜ 🚨 **사고상황 식별:** `{accident_ctx}`'
-        st.info(info_msg)
-      with c2:
-        if st.button(
-            '🤖 AI 가이드 생성',
-            key='btn_global_search',
-            use_container_width=True,
-        ):
-          st.session_state['active_chem'] = mapped_ko
-          st.session_state['active_unno'] = mapped_unno
-          st.session_state['active_cas'] = mapped_cas
-          st.session_state['active_ship'] = (
-              f"자유 통합 검색 ('{search_input}')"
-          )
-          st.session_state['active_accident_context'] = accident_ctx
-          st.session_state['active_summary'] = ''
-          st.session_state['active_key_changed'] = True
-          st.rerun()
+    c1, c2 = st.columns([4, 1])
+    with c1:
+      info_msg = (
+          f'💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN'
+          f' NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`'
+      )
+      if accident_ctx:
+        info_msg += f'\n ｜ 🚨 **사고상황 식별:** `{accident_ctx}`'
+      st.info(info_msg)
+    with c2:
+      if st.button(
+          '🤖 AI 가이드 생성',
+          key='btn_global_search',
+          use_container_width=True,
+      ):
+        st.session_state['active_chem'] = mapped_ko
+        st.session_state['active_unno'] = mapped_unno
+        st.session_state['active_cas'] = mapped_cas
+        st.session_state['active_ship'] = f"자유 통합 검색 ('{curr_q}')"
+        st.session_state['active_accident_context'] = accident_ctx
+        st.session_state['active_summary'] = ''
+        st.session_state['active_key_changed'] = True
+        st.rerun()
 
 # ------------------------------------------
 # [탭 2]: 선박 제원 및 위치 검색
 # ------------------------------------------
 with search_tab_vssl:
-  col_v1, col_v2 = st.columns([4, 1])
-  with col_v1:
-    vssl_query_input = st.text_input(
-        '선박명(한/영) 또는 호출부호를 입력하세요 (예: DAITOMO 7, 대형카훼리,'
-        ' 049034, PACIFIC):',
-        key='vssl_direct_search_box',
-    )
-  with col_v2:
-    st.markdown('<br>', unsafe_allow_html=True)
-    btn_vssl_search = st.button(
-        '🔍 검색',
-        key='btn_direct_vssl_search',
-        use_container_width=True,
-    )
+  with st.form(key='vssl_search_form', clear_on_submit=False):
+    col_v1, col_v2 = st.columns([4, 1])
+    with col_v1:
+      vssl_query_input = st.text_input(
+          '선박명(한/영) 또는 호출부호를 입력하세요 (예: DAITOMO 7, 대형카훼리,'
+          ' 049034, PACIFIC):',
+          key='vssl_direct_search_box',
+      )
+    with col_v2:
+      st.markdown('<br>', unsafe_allow_html=True)
+      btn_vssl_search = st.form_submit_button(
+          '🔍 검색', use_container_width=True
+      )
 
   if btn_vssl_search and vssl_query_input:
     clean_query = vssl_query_input.strip()
@@ -1374,6 +1379,7 @@ with search_tab_vssl:
       st.session_state['vssl_search_results'] = vssl_list
       st.session_state['vssl_search_keyword'] = clean_query
 
+  # 검색 결과 표출 영역
   if 'vssl_search_results' in st.session_state:
     results = st.session_state['vssl_search_results']
     kw = st.session_state.get('vssl_search_keyword', '')
@@ -1477,8 +1483,9 @@ if 'active_chem' in st.session_state:
 
       print(f'🔍 [RAG 고도화 쿼리]: {rag_search_query}')
 
+      # 💡 5페이지(k=5)로 빠른 추출
       rag_text, rag_images = fetch_rag_context_and_images(
-          rag_search_query, k=10
+          rag_search_query, k=5
       )
 
       st.session_state['active_source_data'] = {
