@@ -52,45 +52,74 @@ st.set_page_config(
     initial_sidebar_state='collapsed',
 )
 
-# Light UI + 모바일 가시성 CSS
+# ==========================================
+# 🎨 디자인 시스템 (토큰 기반 리뉴얼)
+# ==========================================
 st.markdown(
     """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
 
     :root {
-        --bg-main: #F8FAFC;
+        /* --- 컬러 토큰 --- */
+        --bg-main: #F5F7FA;
         --bg-card: #FFFFFF;
-        --bg-sub: #F1F5F9;
+        --bg-sub: #EEF2F7;
         --text-main: #0F172A;
         --text-sub: #64748B;
+        --text-faint: #94A3B8;
         --border-color: #E2E8F0;
-        --accent-blue: #3B82F6;
-        --accent-blue-hover: #2563EB;
+        --accent-blue: #2563EB;
+        --accent-blue-hover: #1D4ED8;
+        --accent-blue-soft: #EFF6FF;
+        --accent-red: #DC2626;
+        --accent-red-soft: #FEF2F2;
+        --accent-orange: #EA580C;
+        --accent-orange-soft: #FFF7ED;
+        --accent-green: #059669;
+        --accent-green-soft: #ECFDF5;
+
+        /* --- 간격 토큰 --- */
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --space-6: 24px;
+        --space-8: 32px;
+
+        /* --- 반경 / 그림자 --- */
+        --radius-sm: 10px;
+        --radius-md: 16px;
+        --radius-lg: 22px;
+        --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+        --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
     }
 
     @media (prefers-color-scheme: dark) {
         :root {
-            --bg-main: #0F172A;
-            --bg-card: #1E293B;
-            --bg-sub: #334155;
-            --text-main: #F8FAFC;
+            --bg-main: #0B1220;
+            --bg-card: #151E2E;
+            --bg-sub: #1E293B;
+            --text-main: #F1F5F9;
             --text-sub: #94A3B8;
-            --border-color: #334155;
+            --text-faint: #64748B;
+            --border-color: #263349;
             --accent-blue: #60A5FA;
             --accent-blue-hover: #3B82F6;
+            --accent-blue-soft: #1E293B;
+            --accent-red-soft: #2A1618;
+            --accent-orange-soft: #2A1F14;
+            --accent-green-soft: #12241D;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+            --shadow-md: 0 8px 24px rgba(0,0,0,0.4);
         }
     }
-
     [data-theme="dark"] {
-        --bg-main: #0F172A;
-        --bg-card: #1E293B;
-        --bg-sub: #334155;
-        --text-main: #F8FAFC;
-        --text-sub: #94A3B8;
-        --border-color: #334155;
-        --accent-blue: #60A5FA;
-        --accent-blue-hover: #3B82F6;
+        --bg-main: #0B1220; --bg-card: #151E2E; --bg-sub: #1E293B;
+        --text-main: #F1F5F9; --text-sub: #94A3B8; --text-faint: #64748B;
+        --border-color: #263349; --accent-blue: #60A5FA; --accent-blue-hover: #3B82F6;
+        --accent-blue-soft: #1E293B; --accent-red-soft: #2A1618;
+        --accent-orange-soft: #2A1F14; --accent-green-soft: #12241D;
     }
 
     html, body, [class*="css"], .stApp {
@@ -98,79 +127,172 @@ st.markdown(
         background-color: var(--bg-main) !important;
         color: var(--text-main) !important;
     }
+    p, span, div, label, h1, h2, h3, h4, h5, h6 { color: var(--text-main) !important; }
+    .block-container { padding-top: 2rem !important; max-width: 1200px; }
 
-    p, span, div, label, h1, h2, h3, h4, h5, h6 {
-        color: var(--text-main) !important;
-    }
-
+    /* ===== 히어로 ===== */
     .hero-container {
-        padding: 2rem;
-        background: var(--bg-card) !important;
+        padding: 1.75rem 2rem;
+        background: linear-gradient(135deg, var(--bg-card) 0%, var(--accent-blue-soft) 130%) !important;
         border: 1px solid var(--border-color) !important;
-        border-radius: 20px !important;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05) !important;
-        margin-bottom: 1.5rem;
+        border-radius: var(--radius-lg) !important;
+        box-shadow: var(--shadow-md) !important;
+        margin-bottom: var(--space-6);
     }
-    
-    .main-header {
-        font-size: 2.1rem;
-        font-weight: 800;
-        color: var(--text-main) !important;
-        letter-spacing: -0.5px;
-        margin-bottom: 6px;
+    .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .hero-left { display: flex; align-items: center; gap: 16px; }
+    .hero-logo-badge {
+        width: 54px; height: 54px; border-radius: 14px; background: var(--bg-card);
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); overflow: hidden;
     }
-    
-    .sub-header {
-        color: var(--text-sub) !important;
-        font-size: 0.95rem;
-        font-weight: 500;
+    .main-header { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.4px; margin: 0; line-height: 1.25; }
+    .sub-header { color: var(--text-sub) !important; font-size: 0.85rem; font-weight: 500; margin-top: 2px; }
+    .live-chip {
+        display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px;
+        background: var(--accent-green-soft); color: var(--accent-green) !important;
+        border-radius: 999px; font-size: 0.78rem; font-weight: 700; border: 1px solid rgba(5,150,105,0.2);
+    }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-green); animation: pulse 1.6s infinite; }
+    @keyframes pulse { 0%{opacity:1;} 50%{opacity:.35;} 100%{opacity:1;} }
+
+    /* ===== 섹션 타이틀 ===== */
+    .section-title { display:flex; align-items:center; gap:10px; margin: var(--space-6) 0 var(--space-3) 0; }
+    .section-title h3 { font-size: 1.15rem !important; font-weight: 800 !important; margin: 0 !important; }
+    .section-title .icon-box {
+        width: 34px; height: 34px; border-radius: 10px; background: var(--accent-blue-soft);
+        display:flex; align-items:center; justify-content:center; font-size: 1rem;
     }
 
+    /* ===== 입력창 / 버튼 ===== */
     .stTextInput input {
         background-color: var(--bg-card) !important;
-        border: 1px solid var(--border-color) !important;
-        border-radius: 12px !important;
+        border: 1.5px solid var(--border-color) !important;
+        border-radius: var(--radius-sm) !important;
         color: var(--text-main) !important;
         font-weight: 600 !important;
+        padding: 0.6rem 0.9rem !important;
+    }
+    .stTextInput input:focus { border-color: var(--accent-blue) !important; box-shadow: 0 0 0 3px var(--accent-blue-soft) !important; }
+    .stDateInput input {
+        background-color: var(--bg-card) !important; border-radius: var(--radius-sm) !important;
+        border: 1.5px solid var(--border-color) !important; font-weight: 600 !important;
     }
 
-    .stButton > button {
-        border-radius: 12px !important;
+    .stButton > button, .stFormSubmitButton > button {
+        border-radius: var(--radius-sm) !important;
         background-color: var(--accent-blue) !important;
         color: #FFFFFF !important;
         border: none !important;
-        font-weight: 600 !important;
-        font-size: 0.9rem !important;
-        padding: 0.5rem 1rem !important;
-        transition: all 0.2s ease !important;
+        font-weight: 700 !important;
+        font-size: 0.88rem !important;
+        padding: 0.6rem 1.1rem !important;
+        transition: all 0.15s ease !important;
+        box-shadow: var(--shadow-sm) !important;
     }
-
-    .stButton > button * {
-        color: #FFFFFF !important;
-    }
-
-    .stButton > button:hover, .stButton > button:active {
+    .stButton > button *, .stFormSubmitButton > button * { color: #FFFFFF !important; }
+    .stButton > button:hover, .stFormSubmitButton > button:hover {
         background-color: var(--accent-blue-hover) !important;
-        color: #FFFFFF !important;
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-md) !important;
     }
 
+    /* ===== 탭: 필(pill) 스타일 ===== */
+    div[data-baseweb="tab-list"] {
+        gap: 6px !important; background: var(--bg-sub) !important;
+        padding: 6px !important; border-radius: 14px !important;
+        border: 1px solid var(--border-color) !important; width: fit-content;
+    }
+    button[data-baseweb="tab"] {
+        border-radius: 10px !important; padding: 8px 20px !important;
+        font-weight: 700 !important; background: transparent !important;
+    }
+    button[data-baseweb="tab"] p { color: var(--text-sub) !important; font-weight: 700 !important; }
+    button[data-baseweb="tab"][aria-selected="true"] { background: var(--accent-blue) !important; box-shadow: var(--shadow-sm); }
+    button[data-baseweb="tab"][aria-selected="true"] p { color: #FFFFFF !important; }
+    div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"] { display: none !important; }
+
+    /* ===== 카드형 컨테이너 (st.container(border=True)) ===== */
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        border-radius: var(--radius-md) !important;
+        border-color: var(--border-color) !important;
+        background: var(--bg-card) !important;
+        box-shadow: var(--shadow-sm) !important;
+    }
+
+    /* ===== expander ===== */
     .streamlit-expanderHeader {
         background-color: var(--bg-card) !important;
-        border-radius: 14px !important;
+        border-radius: var(--radius-sm) !important;
         border: 1px solid var(--border-color) !important;
         color: var(--text-main) !important;
         font-weight: 700 !important;
-        padding: 0.8rem 1rem !important;
+        padding: 0.85rem 1.1rem !important;
     }
-
     .streamlit-expanderContent {
         background-color: var(--bg-card) !important;
         border: 1px solid var(--border-color) !important;
         border-top: none !important;
-        border-bottom-left-radius: 14px !important;
-        border-bottom-right-radius: 14px !important;
-        padding: 1rem !important;
+        border-bottom-left-radius: var(--radius-sm) !important;
+        border-bottom-right-radius: var(--radius-sm) !important;
+        padding: 1.1rem !important;
     }
+
+    /* ===== 상태 배너 ===== */
+    .status-banner {
+        display:flex; align-items:center; gap: 10px; flex-wrap: wrap;
+        background: var(--accent-red-soft); border: 1px solid rgba(220,38,38,0.25);
+        border-radius: var(--radius-md); padding: 14px 18px; margin-bottom: var(--space-3);
+        font-weight: 700; font-size: 0.92rem;
+    }
+    .status-banner b { color: var(--accent-red) !important; }
+    .caution-banner {
+        background: var(--accent-orange-soft); border: 1px solid rgba(234,88,12,0.25);
+        border-radius: var(--radius-sm); padding: 10px 16px; font-size: 0.82rem;
+        color: var(--text-sub) !important; margin-bottom: var(--space-4);
+    }
+
+    /* ===== AI 매핑 결과 / 메트릭 스트립 ===== */
+    .mapping-strip { display:flex; gap: 10px; flex-wrap: wrap; margin: var(--space-3) 0; }
+    .mapping-pill {
+        background: var(--bg-card); border: 1px solid var(--border-color);
+        border-radius: 12px; padding: 8px 14px; box-shadow: var(--shadow-sm);
+    }
+    .mapping-pill .k { font-size: 0.68rem; font-weight: 700; color: var(--text-faint) !important; text-transform: uppercase; letter-spacing: .04em; }
+    .mapping-pill .v { font-size: 0.95rem; font-weight: 800; color: var(--text-main) !important; margin-top: 2px; }
+    .mapping-pill.accent .v { color: var(--accent-blue) !important; }
+
+    .metric-strip { display:flex; gap:12px; flex-wrap:wrap; margin: var(--space-2) 0 var(--space-6) 0; }
+    .metric-card {
+        flex: 1 1 220px;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 14px 16px;
+        border-left: 4px solid var(--accent-blue);
+        box-shadow: var(--shadow-sm);
+    }
+    .metric-card.danger { border-left-color: var(--accent-red); }
+    .metric-card.warning { border-left-color: var(--accent-orange); }
+    .metric-card.success { border-left-color: var(--accent-green); }
+    .metric-label { font-size:.72rem; font-weight:800; color:var(--text-sub) !important; letter-spacing:.02em; margin-bottom:5px; }
+    .metric-value { font-size:.92rem; font-weight:600; color:var(--text-main) !important; line-height:1.55; }
+
+    .badge {
+        display:inline-block; padding: 1px 9px; border-radius: 999px;
+        font-size:.76rem; font-weight:800; margin: 1px 2px;
+    }
+    .badge-red { background:#FEE2E2; color:#B91C1C; }
+    .badge-orange { background:#FFEDD5; color:#C2410C; }
+    .badge-blue { background:#DBEAFE; color:#1D4ED8; }
+    .badge-gray { background:#F1F5F9; color:#475569; }
+
+    /* ===== 선박 카드 상태 칩 ===== */
+    .vessel-chip { display:inline-block; padding: 3px 11px; border-radius: 999px; font-size:.75rem; font-weight:800; }
+    .vessel-chip.in { background: var(--accent-green-soft); color: var(--accent-green) !important; }
+    .vessel-chip.out { background: var(--accent-orange-soft); color: var(--accent-orange) !important; }
+
+    hr { border-color: var(--border-color) !important; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -181,7 +303,117 @@ GEMINI_API_KEY = st.secrets.get('GEMINI_API_KEY', '')
 AISSTREAM_API_KEY = st.secrets.get('AISSTREAM_API_KEY', '')
 
 # ==========================================
-# 1. 🖼️ PDF 인덱스 맵 생성 (JSON 파일 오프라인 저장으로 새로고침 시 0.01초 초고속 로딩)
+# 🧩 디자인 헬퍼 함수 (신규)
+# ==========================================
+
+
+def section_title(icon, text):
+  st.markdown(
+      f"""
+<div class="section-title">
+    <div class="icon-box">{icon}</div>
+    <h3>{text}</h3>
+</div>
+""",
+      unsafe_allow_html=True,
+  )
+
+
+def render_mapping_strip(pairs):
+  """AI 매핑 결과를 pill 형태로 렌더링. pairs: [(label, value, accent_bool), ...]"""
+  html = '<div class="mapping-strip">'
+  for label, value, accent in pairs:
+    cls = 'mapping-pill accent' if accent else 'mapping-pill'
+    html += (
+        f'<div class="{cls}"><div class="k">{label}</div>'
+        f'<div class="v">{value}</div></div>'
+    )
+  html += '</div>'
+  st.markdown(html, unsafe_allow_html=True)
+
+
+def _escape_html(text):
+  return (text or '').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def highlight_badges(text):
+  """핵심요약 문장 내 이격거리(m), 보호구 레벨, X/Y/Z류 등을 배지로 강조."""
+  text = _escape_html(text)
+  text = re.sub(r'(Level\s?[A-D])', r'<span class="badge badge-red">\1</span>', text)
+  text = re.sub(
+      r'(\d[\d,]*\s?(?:m|미터|kts|℃|°C))', r'<span class="badge badge-blue">\1</span>', text
+  )
+  text = re.sub(
+      r'\b([XYZ]류)\b', r'<span class="badge badge-orange">\1</span>', text
+  )
+  return text
+
+
+def parse_ai_summary(raw_text):
+  """Gemini가 생성한 마크다운 응답을 [초동대응 핵심요약 bullets]와 [본문 섹션들]로 분리."""
+  if not raw_text:
+    return [], []
+
+  parts = re.split(r'\n###\s+', raw_text)
+  head = parts[0]
+  section_blocks = parts[1:]
+
+  bullet_pattern = re.compile(r'^\*\s*\*\*(.+?)\*\*[:：]\s*(.+)$')
+  bullets = []
+  for line in head.split('\n'):
+    line = line.strip()
+    m = bullet_pattern.match(line)
+    if m:
+      bullets.append((m.group(1).strip(), m.group(2).strip()))
+
+  sections = []
+  for block in section_blocks:
+    block = block.strip()
+    if not block:
+      continue
+    lines = block.split('\n', 1)
+    title = lines[0].strip()
+    body = lines[1].strip() if len(lines) > 1 else ''
+    sections.append((title, body))
+
+  return bullets, sections
+
+
+def render_ai_summary(raw_text):
+  bullets, sections = parse_ai_summary(raw_text)
+
+  if not bullets and not sections:
+    st.markdown(raw_text)
+    return
+
+  if bullets:
+    st.markdown(
+        '<div class="section-title" style="margin-top:0;">'
+        '<div class="icon-box">🚨</div><h3>초동대응 핵심요약</h3></div>',
+        unsafe_allow_html=True,
+    )
+    tone_cycle = ['danger', 'warning', 'primary', 'success']
+    icon_cycle = ['🧪', '📏', '🦺', '🧭']
+    html = '<div class="metric-strip">'
+    for i, (label, value) in enumerate(bullets):
+      tone = tone_cycle[i % len(tone_cycle)]
+      icon = icon_cycle[i % len(icon_cycle)]
+      html += (
+          f'<div class="metric-card {tone}">'
+          f'<div class="metric-label">{icon} {label}</div>'
+          f'<div class="metric-value">{highlight_badges(value)}</div>'
+          '</div>'
+      )
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+  for idx, (title, body) in enumerate(sections):
+    with st.expander(title, expanded=(idx == 0)):
+      st.markdown(body)
+
+
+# ==========================================
+# 1. 🖼️ PDF 인덱스 맵 생성
 # ==========================================
 
 HNS_INDEX_JSON_PATH = 'hns_pdf_index.json'
@@ -315,7 +547,6 @@ def load_kcg_vectorstore():
 kcg_vectorstore = load_kcg_vectorstore()
 
 
-# 💡 가이드 참고 페이지를 5페이지로 최적화 (시간 단축)
 def fetch_rag_context_and_images(query, k=5):
   if not kcg_vectorstore or not query:
     return 'RAG 가이드 데이터베이스 미생성', []
@@ -645,7 +876,6 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-# 💡 가이드 문서 명세(vsslKorNm, vsslEngNm)를 100% 반영한 다중 선박 API 함수[cite: 6]
 @st.cache_data(ttl=300)
 def fetch_vessel_spec_list_api(query_str, max_results=50):
   if not PUBLIC_API_KEY or not query_str:
@@ -677,11 +907,9 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
             break
 
           for item in items:
-            # 💡 가이드 문서 명세 표준 태그 파싱[cite: 6]
             kor_name = (item.findtext('vsslKorNm') or '').strip() or '-'
             eng_name = (item.findtext('vsslEngNm') or '').strip() or '-'
 
-            # 영문/한글 병기 표시명 구성
             if eng_name != '-' and kor_name != '-':
               if eng_name.upper() == kor_name.upper():
                 display_name = eng_name
@@ -747,7 +975,7 @@ def fetch_vessel_spec_api(clsgn, vssl_nm):
 
 
 # ==========================================
-# 3. 🧠 Gemini Vision 멀티모달 프롬프트 연동 (우선순위: 3.7 -> 3.6 -> 3.5)
+# 3. 🧠 Gemini Vision 멀티모달 프롬프트 연동
 # ==========================================
 
 
@@ -780,7 +1008,6 @@ def map_search_query_with_gemini(query_text):
             "accident_context": "사고 상황 요약 문장 또는 빈값"
         }}
         """
-    # 💡 우선순위 변경: 3.7 -> 3.6 -> 3.5
     for model_id in [
         'gemini-3.7-flash',
         'gemini-3.6-flash',
@@ -906,7 +1133,6 @@ def generate_gemini_vision_summary(
     for r_img in rag_images:
       contents_input.append(r_img['pil_img'])
 
-    # 💡 우선순위 변경: 3.7 -> 3.6 -> 3.5
     for model_id in [
         'gemini-3.7-flash',
         'gemini-3.6-flash',
@@ -927,7 +1153,7 @@ def generate_gemini_vision_summary(
 
 
 # ==========================================
-# ⚓ AISStream WebSocket 실시간 위치 수신 (개선형)
+# ⚓ AISStream WebSocket 실시간 위치 수신
 # ==========================================
 
 
@@ -1003,134 +1229,142 @@ def fetch_aisstream_vessel_position(
 
 
 # ==========================================
-# 🚢 모달 팝업: 지도 이동 시 재로딩 완벽 방지 (HTML 컴포넌트 방식)
+# 🚢 모달 팝업: 선박 제원 및 실시간 위치
 # ==========================================
 
 
 @st.dialog('🚢 선박 제원 및 실시간 AIS 위치 정보', width='large')
 def show_vessel_detail_dialog(v):
-  st.subheader(f"⚓ {v['vssl_nm']} (`호출부호: {v['clsgn']}`)")
+  st.markdown(
+      f"### ⚓ {v['vssl_nm']} <code>{v['clsgn']}</code>", unsafe_allow_html=True
+  )
   st.divider()
 
   col_left, col_right = st.columns([1, 1])
 
   with col_left:
-    st.markdown('#### 📐 선박 제원 스펙 정보')
-    spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+    with st.container(border=True):
+      st.markdown('#### 📐 선박 제원 스펙 정보')
+      spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
 
-    if spec_info:
-      kor_nm = spec_info.get('vsslKorNm', '-')
-      eng_nm = spec_info.get('vsslEngNm', '-')
+      if spec_info:
+        kor_nm = spec_info.get('vsslKorNm', '-')
+        eng_nm = spec_info.get('vsslEngNm', '-')
 
-      # 💡 선박명(한/영) 포맷 통일: 둘 다 있거나 한쪽만 있을 때 정확히 표출[cite: 6]
-      if kor_nm != '-' and eng_nm != '-':
-        name_str = (
-            f'{kor_nm} / {eng_nm}'
-            if kor_nm.upper() != eng_nm.upper()
-            else f'{kor_nm} / {eng_nm}'
+        if kor_nm != '-' and eng_nm != '-':
+          name_str = f'{kor_nm} / {eng_nm}'
+        elif kor_nm != '-':
+          name_str = f'{kor_nm} / -'
+        elif eng_nm != '-':
+          name_str = f'- / {eng_nm}'
+        else:
+          name_str = f"{v.get('vssl_nm', '-')} / -"
+
+        st.write(f'- **선박명(한/영):** {name_str}')
+        st.write(
+            f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` /"
+            f' `{spec_info["imoNo"]}`'
         )
-      elif kor_nm != '-':
-        name_str = f'{kor_nm} / -'
-      elif eng_nm != '-':
-        name_str = f'- / {eng_nm}'
+        if spec_info.get('mmsiNo') and spec_info.get('mmsiNo') != '-':
+          st.write(f"- **MMSI 번호:** `{spec_info['mmsiNo']}`")
+        st.write(
+            f"- **선종 / 국적:** {spec_info['vsslKnd']} /"
+            f" {spec_info['vsslNlty']}"
+        )
+        st.write(f"- **총톤수(GRT):** {spec_info['grtg']} 톤")
+        st.write(
+            f"- **선박 길이×너비:** {spec_info['vsslTotLt']}m ×"
+            f' {spec_info["shdth"]}m'
+        )
+        st.write(
+            f"- **흘수 / 깊이:** {spec_info['vsslDrft']}m /"
+            f" {spec_info['vsslDp']}m"
+        )
+        st.write(
+            f"- **운항형태 / 나용선:** {spec_info['nvgShapNm']} /"
+            f' {spec_info["brbtSeNm"]}'
+        )
+        st.write(f"- **건조일시:** {spec_info['vsslCnstrDt']}")
       else:
-        name_str = f"{v.get('vssl_nm', '-')} / -"
-
-      st.write(f'- **선박명(한/영):** {name_str}')
-      st.write(
-          f"- **선박번호 / IMO:** `{spec_info['vsslNo']}` /"
-          f' `{spec_info["imoNo"]}`'
-      )
-      if spec_info.get('mmsiNo') and spec_info.get('mmsiNo') != '-':
-        st.write(f"- **MMSI 번호:** `{spec_info['mmsiNo']}`")
-      st.write(
-          f"- **선종 / 국적:** {spec_info['vsslKnd']} / {spec_info['vsslNlty']}"
-      )
-      st.write(f"- **총톤수(GRT):** {spec_info['grtg']} 톤")
-      st.write(
-          f"- **선박 길이×너비:** {spec_info['vsslTotLt']}m ×"
-          f' {spec_info["shdth"]}m'
-      )
-      st.write(
-          f"- **흘수 / 깊이:** {spec_info['vsslDrft']}m / {spec_info['vsslDp']}m"
-      )
-      st.write(
-          f"- **운항형태 / 나용선:** {spec_info['nvgShapNm']} /"
-          f' {spec_info["brbtSeNm"]}'
-      )
-      st.write(f"- **건조일시:** {spec_info['vsslCnstrDt']}")
-    else:
-      st.warning('💡 해수부 API에 등록된 선박제원 스펙이 없습니다.')
+        st.warning('💡 해수부 API에 등록된 선박제원 스펙이 없습니다.')
 
   with col_right:
-    st.markdown('#### 🛰️ 실시간 AIS 위치 및 지도')
-    imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
+    with st.container(border=True):
+      st.markdown('#### 🛰️ 실시간 AIS 위치 및 지도')
+      imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
 
-    with st.spinner('AISStream 신호 탐색 중...'):
-      ais_pos = fetch_aisstream_vessel_position(
-          vssl_nm=v['vssl_nm'],
-          clsgn=v['clsgn'],
-          imo_no=imo_number,
-          timeout_sec=3,
-      )
-
-    if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
-      lat, lon = ais_pos['lat'], ais_pos['lon']
-      sog, cog = ais_pos['sog'], ais_pos['cog']
-      time_utc = ais_pos['time_utc']
-
-      st.success(
-          f'📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)'
-      )
-      st.write(f'- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°')
-      st.write(f'- **수신시각(UTC):** {time_utc}')
-
-      m = folium.Map(location=[lat, lon], zoom_start=13)
-      folium.Marker(
-          [lat, lon],
-          popup=f"{v['vssl_nm']} ({sog}kts)",
-          tooltip=f"{v['vssl_nm']}",
-          icon=folium.Icon(color='red', icon='ship', prefix='fa'),
-      ).add_to(m)
-
-      map_html = m._repr_html_()
-      components.html(map_html, height=280)
-    else:
-      st.info(
-          '💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답'
-          ' 대기 중)'
-      )
-
-      facility_nm = v.get('laidup_fclty_nm', '-')
-      st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
-
-      if imo_number and imo_number not in ['-', '0000', '없음', '']:
-        mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{imo_number}'
-        st.markdown(
-            f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {imo_number})"
-            f' 실시간 위치 상세 보기]({mt_link})**'
+      with st.spinner('AISStream 신호 탐색 중...'):
+        ais_pos = fetch_aisstream_vessel_position(
+            vssl_nm=v['vssl_nm'],
+            clsgn=v['clsgn'],
+            imo_no=imo_number,
+            timeout_sec=3,
         )
+
+      if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
+        lat, lon = ais_pos['lat'], ais_pos['lon']
+        sog, cog = ais_pos['sog'], ais_pos['cog']
+        time_utc = ais_pos['time_utc']
+
+        st.success(
+            f'📍 **위치 수신 성공** (위도: `{lat:.4f}`, 경도: `{lon:.4f}`)'
+        )
+        st.write(f'- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°')
+        st.write(f'- **수신시각(UTC):** {time_utc}')
+
+        m = folium.Map(location=[lat, lon], zoom_start=13)
+        folium.Marker(
+            [lat, lon],
+            popup=f"{v['vssl_nm']} ({sog}kts)",
+            tooltip=f"{v['vssl_nm']}",
+            icon=folium.Icon(color='red', icon='ship', prefix='fa'),
+        ).add_to(m)
+
+        map_html = m._repr_html_()
+        components.html(map_html, height=280)
       else:
-        mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
-        st.markdown(
-            '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
-            f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
+        st.info(
+            '💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답'
+            ' 대기 중)'
         )
 
-      default_m = folium.Map(location=[37.00, 126.60], zoom_start=10)
-      components.html(default_m._repr_html_(), height=260)
+        facility_nm = v.get('laidup_fclty_nm', '-')
+        st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
+
+        if imo_number and imo_number not in ['-', '0000', '없음', '']:
+          mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{imo_number}'
+          st.markdown(
+              f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {imo_number})"
+              f' 실시간 위치 상세 보기]({mt_link})**'
+          )
+        else:
+          mt_area_link = 'https://www.marinetraffic.com/en/ais/home/centerx:126.6/centery:37.0/zoom:11'
+          st.markdown(
+              '🔗 **[MarineTraffic 평택·대산항 관제 해역 지도에서'
+              f' `{v["vssl_nm"]}` 위치 확인하기]({mt_area_link})**'
+          )
+
+        default_m = folium.Map(location=[37.00, 126.60], zoom_start=10)
+        components.html(default_m._repr_html_(), height=260)
 
 
 def render_vessel_item_card(v, port_code, idx):
+  chip_cls = 'in' if '입' in str(v['etrynd_nm']) else 'out'
   expander_label = (
-      f"🚢 [{v['vssl_nm']}] 호출부호: {v['clsgn']} ｜ 선종:"
-      f" {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
+      f"🚢 {v['vssl_nm']}  ·  {v['clsgn']}  ·  {v['vssl_knd_nm']}  ·"
+      f" {v['laidup_fclty_nm']}"
   )
 
   with st.expander(expander_label, expanded=False):
+    st.markdown(
+        f'<span class="vessel-chip {chip_cls}">{v["etrynd_nm"]}'
+        f' · {v["reqst_se_nm"]}</span>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<br>', unsafe_allow_html=True)
     col1, col2, col3 = st.columns(3)
     with col1:
-      st.markdown('**[선박 및 국적 정보]**')
+      st.markdown('**⚓ 선박 및 국적 정보**')
       st.write(f"- **항구청명:** {v['prt_ag_nm']}")
       st.write(f"- **선박명:** **{v['vssl_nm']}**")
       st.write(f"- **호출부호:** `{v['clsgn']}`")
@@ -1143,7 +1377,7 @@ def render_vessel_item_card(v, port_code, idx):
       st.write(f"- **선원수:** {v['crew_co']} 명")
 
     with col2:
-      st.markdown('**[운항 및 관제 일시]**')
+      st.markdown('**🕐 운항 및 관제 일시**')
       st.write(f"- **입출항구분명:** {v['etrynd_nm']} ({v['reqst_se_nm']})")
       st.write(f"- **입항목적명:** {v['etrypt_purps_nm']}")
       st.write(f"- **입항일시:** {v['etrypt_dt']}")
@@ -1154,7 +1388,7 @@ def render_vessel_item_card(v, port_code, idx):
       st.write(f"- **신고업체명:** {v['satmnt_entrps_nm']}")
 
     with col3:
-      st.markdown('**[항로 및 화물 명세]**')
+      st.markdown('**🧭 항로 및 화물 명세**')
       st.write(f"- **전출항지항구명:** {v['prvs_dpmprt_prt_nm']}")
       st.write(f"- **차출항지항구명:** {v['nxlnpt_prt_nm']}")
       st.write(f"- **목적지항구명:** {v['dstn_prt_nm']}")
@@ -1260,36 +1494,36 @@ def render_combined_port_tab_content(port_name, port_code):
 
 
 # ==========================================
-# 5. 메인 화면 구성 (Hero Section & 로고 정렬)
+# 5. 메인 화면 구성 (Hero Section)
 # ==========================================
-if kcg_logo_b64:
-  st.markdown(
-      f"""
-    <div class="hero-container">
-        <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 6px;">
-            <img src="data:image/png;base64,{kcg_logo_b64}" style="width: 58px; height: auto; object-fit: contain;" alt="해양경찰 로고" />
-            <div class="main-header" style="margin: 0;">평택해양경찰서 HNS AI 대응 시스템</div>
+_logo_html = (
+    f'<img src="data:image/png;base64,{kcg_logo_b64}" style="width:100%;height:100%;object-fit:contain;" alt="해양경찰 로고" />'
+    if kcg_logo_b64
+    else '🚢'
+)
+
+st.markdown(
+    f"""
+<div class="hero-container">
+    <div class="hero-top">
+        <div class="hero-left">
+            <div class="hero-logo-badge">{_logo_html}</div>
+            <div>
+                <div class="main-header">평택해양경찰서 HNS AI 대응 시스템</div>
+                <div class="sub-header">공공 API(해양수산부·화학물질안전원·안전보건공단) + 해경 DB(HNS 정보집·대응가이드) + Gemini AI</div>
+            </div>
         </div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
+        <div class="live-chip"><span class="live-dot"></span>SYSTEM ONLINE</div>
     </div>
-    """,
-      unsafe_allow_html=True,
-  )
-else:
-  st.markdown(
-      """
-    <div class="hero-container">
-        <div class="main-header">🚢 평택해양경찰서 HNS AI 대응 시스템</div>
-        <div class="sub-header">공공 API(해양수산부, 화학물질안전원, 안전보건공단) + 해경 DB(HNS 정보집, HNS 대응가이드) + Gemini AI</div>
-    </div>
-    """,
-      unsafe_allow_html=True,
-  )
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 # ==========================================
-# 🔥 상단 통합 검색 시스템 (2개 탭 분기)
+# 🔥 상단 통합 검색 시스템
 # ==========================================
-st.markdown('### 🔎 통합 검색 시스템')
+section_title('🔎', '통합 검색 시스템')
 
 search_tab_chem, search_tab_vssl = st.tabs([
     '🧪 HNS 물질 및 사고상황 AI 검색',
@@ -1297,7 +1531,7 @@ search_tab_chem, search_tab_vssl = st.tabs([
 ])
 
 # ------------------------------------------
-# [탭 1]: 화학물질 및 사고상황 AI 검색 (Form 기반 안정화 + 검색 버튼)
+# [탭 1]: 화학물질 및 사고상황 AI 검색
 # ------------------------------------------
 with search_tab_chem:
   with st.form(key='chem_search_form', clear_on_submit=False):
@@ -1317,7 +1551,6 @@ with search_tab_chem:
   if submit_chem_search and search_input_val:
     st.session_state['active_search_query'] = search_input_val.strip()
 
-  # 💡 검색된 질의가 있을 때 AI 매핑 결과와 가이드 생성 버튼을 항상 안정적으로 노출
   curr_q = st.session_state.get('active_search_query', '')
   if curr_q:
     with st.spinner('Gemini AI가 입력 내용을 지능형 분석 중...'):
@@ -1330,14 +1563,21 @@ with search_tab_chem:
 
     c1, c2 = st.columns([4, 1])
     with c1:
-      info_msg = (
-          f'💡 **AI 매핑 결과:** 물질명: **{mapped_ko}** ({mapped_eng}) ｜ UN'
-          f' NO: `{mapped_unno}` ｜ CAS NO: `{mapped_cas}`'
-      )
+      pill_pairs = [
+          ('물질명', mapped_ko, True),
+          ('영문명', mapped_eng, False),
+          ('UN NO', mapped_unno, False),
+          ('CAS NO', mapped_cas, False),
+      ]
+      render_mapping_strip(pill_pairs)
       if accident_ctx:
-        info_msg += f'\n ｜ 🚨 **사고상황 식별:** `{accident_ctx}`'
-      st.info(info_msg)
+        st.markdown(
+            f'<div class="caution-banner">🚨 <b>사고상황 식별:</b>'
+            f' {accident_ctx}</div>',
+            unsafe_allow_html=True,
+        )
     with c2:
+      st.markdown('<br>', unsafe_allow_html=True)
       if st.button(
           '🤖 AI 가이드 생성',
           key='btn_global_search',
@@ -1379,7 +1619,6 @@ with search_tab_vssl:
       st.session_state['vssl_search_results'] = vssl_list
       st.session_state['vssl_search_keyword'] = clean_query
 
-  # 검색 결과 표출 영역
   if 'vssl_search_results' in st.session_state:
     results = st.session_state['vssl_search_results']
     kw = st.session_state.get('vssl_search_keyword', '')
@@ -1428,7 +1667,7 @@ with search_tab_vssl:
             show_vessel_detail_dialog(dummy_vessel_obj)
 
 # ------------------------------------------
-# ⚡ AI 대응 가이드 출력 모달/컨테이너 (Vision 연동)
+# ⚡ AI 대응 가이드 출력 영역
 # ------------------------------------------
 if 'active_chem' in st.session_state:
   st.divider()
@@ -1438,19 +1677,20 @@ if 'active_chem' in st.session_state:
   ship_info = st.session_state['active_ship']
   accident_ctx = st.session_state.get('active_accident_context', '')
 
-  status_header = (
-      f'⚡ [지능형 비상대응 가이드] 대상: {ship_info} ｜ 물질: {chem} (UN NO:'
-      f' {unno} / CAS NO: {cas})'
-  )
+  status_line = f'대상: {ship_info}  ·  물질: {chem} (UN {unno} / CAS {cas})'
   if accident_ctx:
-    status_header += f' ｜ 상황: {accident_ctx}'
-  st.error(status_header)
-
-  st.caption(
-      '⚠️ **[할루시네이션 주의]** 본 대응 가이드는 공공 API 3종 및 해경 HNS'
-      ' 정보집, HNS 대응가이드를 통합한 Gemini RAG(검색증강생성) 모델로 AI 환각'
-      ' 현상을 최소화했습니다. **단, 현장 상황은 가이드와 다를 수 있으므로'
-      ' 반드시 재확인하시기 바랍니다.**'
+    status_line += f'  ·  상황: {accident_ctx}'
+  st.markdown(
+      f'<div class="status-banner">⚡ <b>지능형 비상대응 가이드</b>'
+      f' &nbsp;|&nbsp; {status_line}</div>',
+      unsafe_allow_html=True,
+  )
+  st.markdown(
+      '<div class="caution-banner">⚠️ <b>할루시네이션 주의</b> — 본 대응'
+      ' 가이드는 공공 API 3종 및 해경 HNS 정보집·대응가이드를 통합한 Gemini'
+      ' RAG 모델로 AI 환각 현상을 최소화했습니다. 단, 현장 상황은 가이드와'
+      ' 다를 수 있으므로 반드시 재확인하시기 바랍니다.</div>',
+      unsafe_allow_html=True,
   )
 
   if (
@@ -1483,7 +1723,6 @@ if 'active_chem' in st.session_state:
 
       print(f'🔍 [RAG 고도화 쿼리]: {rag_search_query}')
 
-      # 💡 5페이지(k=5)로 빠른 추출
       rag_text, rag_images = fetch_rag_context_and_images(
           rag_search_query, k=5
       )
@@ -1513,10 +1752,10 @@ if 'active_chem' in st.session_state:
       )
       st.session_state['active_key_changed'] = False
 
-  st.markdown(st.session_state['active_summary'])
+  render_ai_summary(st.session_state['active_summary'])
 
   # ------------------------------------------
-  # 📚 활용 원본 자료 확인 탭 (스캔 이미지 뷰어 제공)
+  # 📚 활용 원본 자료 확인 탭
   # ------------------------------------------
   if 'active_source_data' in st.session_state:
     src = st.session_state['active_source_data']
@@ -1617,9 +1856,9 @@ if 'active_chem' in st.session_state:
 st.divider()
 
 # ------------------------------------------
-# ⚓ 실시간 항만 선박 모니터링 (평택항 / 대산항 2개 탭)
+# ⚓ 실시간 항만 선박 모니터링
 # ------------------------------------------
-st.markdown('### ⚓ 항만별 실시간 선박입출항현황 (PORT-MIS)')
+section_title('⚓', '항만별 실시간 선박입출항현황 (PORT-MIS)')
 
 tab_pt, tab_ds = st.tabs(['🚢 평택항 입출항 선박', '🚢 대산항 입출항 선박'])
 
