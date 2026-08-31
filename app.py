@@ -644,10 +644,9 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-# 💡 선박명(한글/영문) 및 MMSI 누락 방지 처리된 선박제원 API 함수
+# 💡 영문 선명 우선 + 한글 병기 로직이 적용된 다중 선박 API 함수
 @st.cache_data(ttl=300)
 def fetch_vessel_spec_list_api(query_str, max_results=50):
-  """선박명 또는 호출부호로 검색하여 일치/포함되는 다중 선박 목록을 반환"""
   if not PUBLIC_API_KEY or not query_str:
     return []
 
@@ -677,7 +676,6 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
             break
 
           for item in items:
-            # 선명 한글/영문 필드 정밀 추출
             kor_name = (
                 item.findtext('vsslKorNm')
                 or item.findtext('vsslNm')
@@ -690,10 +688,18 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
                 or '-'
             ).strip()
 
-            # 영문명이 '-' 또는 비어있으면 한글 선명을 대표명으로 설정
-            display_name = kor_name if kor_name != '-' else eng_name
-            if display_name == '-' and eng_name != '-':
+            # 💡 영문 선명 우선 + 한글명 병기 규칙
+            if eng_name != '-' and kor_name != '-':
+              if eng_name.upper() == kor_name.upper():
+                display_name = eng_name
+              else:
+                display_name = f'{eng_name} ({kor_name})'
+            elif eng_name != '-':
               display_name = eng_name
+            elif kor_name != '-':
+              display_name = kor_name
+            else:
+              display_name = '-'
 
             spec = {
                 'vsslNo': (item.findtext('vsslNo') or '-').strip(),
@@ -718,7 +724,6 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
                     .replace('T', ' ')
                 ),
             }
-            # 중복 제거 (vsslNo 기준)
             if not any(r['vsslNo'] == spec['vsslNo'] for r in results):
               results.append(spec)
 
@@ -738,7 +743,6 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
 
 
 def fetch_vessel_spec_api(clsgn, vssl_nm):
-  """단일 선박 제원 상세 반환 (모달 팝업용)"""
   specs = fetch_vessel_spec_list_api(clsgn) or fetch_vessel_spec_list_api(
       vssl_nm
   )
@@ -1280,7 +1284,7 @@ search_tab_chem, search_tab_vssl = st.tabs([
 ])
 
 # ------------------------------------------
-# [탭 1]: 화학물질 및 사고상황 AI 검색 (우측 검색 버튼 추가)
+# [탭 1]: 화학물질 및 사고상황 AI 검색
 # ------------------------------------------
 with search_tab_chem:
   col_c1, col_c2 = st.columns([4, 1])
@@ -1338,7 +1342,7 @@ with search_tab_chem:
           st.rerun()
 
 # ------------------------------------------
-# [탭 2]: 선박 제원 및 위치 검색 (선명 표출 강화 및 버튼명 수정)
+# [탭 2]: 선박 제원 및 위치 검색 (영문 우선 + 한글 병기)
 # ------------------------------------------
 with search_tab_vssl:
   col_v1, col_v2 = st.columns([4, 1])
@@ -1351,7 +1355,7 @@ with search_tab_vssl:
   with col_v2:
     st.markdown('<br>', unsafe_allow_html=True)
     btn_vssl_search = st.button(
-        '🔍 검색',  # 💡 버튼명 수정
+        '🔍 검색',
         key='btn_direct_vssl_search',
         use_container_width=True,
     )
@@ -1381,7 +1385,7 @@ with search_tab_vssl:
           ' (최대 50척 표출)'
       )
 
-      # 💡 선명(한글)이 정확하게 표시되도록 라벨 구성
+      # 💡 영문 선명 우선 + 한글 병기 라벨
       vssl_labels = [
           f"🚢 [{s['displayName']}] 호출부호: {s['clsgn']} ｜ MMSI:"
           f" {s.get('mmsiNo', '-')} ｜ 국적: {s['vsslNlty']} ｜ 선종:"
