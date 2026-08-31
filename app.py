@@ -644,48 +644,83 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
   return f'[KOSHA MSDS chemId: {chem_id}]\n' + '\n'.join(msds_details[:30])
 
 
-def fetch_vessel_spec_api(clsgn, vssl_nm):
-  if not PUBLIC_API_KEY:
-    return None
+# 💡 다중 선박 목록을 조회할 수 있도록 개선된 선박제원 API 함수
+@st.cache_data(ttl=300)
+def fetch_vessel_spec_list_api(query_str, max_results=50):
+  """선박명 또는 호출부호로 검색하여 일치/포함되는 다중 선박 목록을 반환"""
+  if not PUBLIC_API_KEY or not query_str:
+    return []
+
   url = f'https://apis.data.go.kr/1192000/SicsVsslManp3/Info3?serviceKey={PUBLIC_API_KEY}'
   headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-  trials = [('clsgn', str(clsgn).strip()), ('vsslNm', str(vssl_nm).strip())]
+  clean_q = str(query_str).strip()
+
+  results = []
+  trials = [('clsgn', clean_q), ('vsslNm', clean_q)]
 
   for param_key, param_val in trials:
-    if not param_val or param_val == '-':
-      continue
-    params = {param_key: param_val, 'numOfRows': '1', 'pageNo': '1'}
-    try:
-      session = requests.Session()
-      session.verify = False
-      res = session.get(url, params=params, headers=headers, timeout=8)
-      if res.status_code == 200 and res.content:
-        root = ET.fromstring(res.content)
-        item = root.find('.//item')
-        if item is not None:
-          return {
-              'vsslNo': (item.findtext('vsslNo') or '-').strip(),
-              'imoNo': (item.findtext('imoNo') or '-').strip(),
-              'vsslKorNm': (item.findtext('vsslKorNm') or '-').strip(),
-              'vsslEngNm': (item.findtext('vsslEngNm') or '-').strip(),
-              'vsslKnd': (item.findtext('vsslKnd') or '-').strip(),
-              'vsslNlty': (item.findtext('vsslNlty') or '-').strip(),
-              'grtg': (item.findtext('grtg') or '-').strip(),
-              'vsslTotLt': (item.findtext('vsslTotLt') or '-').strip(),
-              'shdth': (item.findtext('shdth') or '-').strip(),
-              'vsslDrft': (item.findtext('vsslDrft') or '-').strip(),
-              'vsslDp': (item.findtext('vsslDp') or '-').strip(),
-              'brbtSeNm': (item.findtext('brbtSeNm') or '-').strip(),
-              'nvgShapNm': (item.findtext('nvgShapNm') or '-').strip(),
-              'vsslCnstrDt': (
-                  (item.findtext('vsslCnstrDt') or '-')
-                  .strip()
-                  .replace('T', ' ')
-              ),
-          }
-    except Exception as e:
-      print(f'선박제원 API 조회 에러: {e}')
-  return None
+    page = 1
+    while len(results) < max_results:
+      params = {
+          param_key: param_val,
+          'numOfRows': '50',
+          'pageNo': str(page),
+      }
+      try:
+        session = requests.Session()
+        session.verify = False
+        res = session.get(url, params=params, headers=headers, timeout=8)
+        if res.status_code == 200 and res.content:
+          root = ET.fromstring(res.content)
+          items = root.findall('.//item') or root.findall('body/items/item')
+          if not items:
+            break
+
+          for item in items:
+            spec = {
+                'vsslNo': (item.findtext('vsslNo') or '-').strip(),
+                'imoNo': (item.findtext('imoNo') or '-').strip(),
+                'clsgn': (item.findtext('clsgn') or '-').strip(),
+                'vsslKorNm': (item.findtext('vsslKorNm') or '-').strip(),
+                'vsslEngNm': (item.findtext('vsslEngNm') or '-').strip(),
+                'vsslKnd': (item.findtext('vsslKnd') or '-').strip(),
+                'vsslNlty': (item.findtext('vsslNlty') or '-').strip(),
+                'grtg': (item.findtext('grtg') or '-').strip(),
+                'vsslTotLt': (item.findtext('vsslTotLt') or '-').strip(),
+                'shdth': (item.findtext('shdth') or '-').strip(),
+                'vsslDrft': (item.findtext('vsslDrft') or '-').strip(),
+                'vsslDp': (item.findtext('vsslDp') or '-').strip(),
+                'brbtSeNm': (item.findtext('brbtSeNm') or '-').strip(),
+                'nvgShapNm': (item.findtext('nvgShapNm') or '-').strip(),
+                'vsslCnstrDt': (
+                    (item.findtext('vsslCnstrDt') or '-')
+                    .strip()
+                    .replace('T', ' ')
+                ),
+            }
+            # 중복 제거 (vsslNo 기준)
+            if not any(r['vsslNo'] == spec['vsslNo'] for r in results):
+              results.append(spec)
+
+          if len(items) < 50:
+            break
+          page += 1
+        else:
+          break
+      except Exception as e:
+        print(f'선박제원 다중목록 조회 에러: {e}')
+        break
+
+    if results:
+      break
+
+  return results
+
+
+def fetch_vessel_spec_api(clsgn, vssl_nm):
+  """단일 선박 제원 상세 반환 (모달 팝업용)"""
+  specs = fetch_vessel_spec_list_api(clsgn) or fetch_vessel_spec_list_api(vssl_nm)
+  return specs[0] if specs else None
 
 
 # ==========================================
@@ -1217,20 +1252,34 @@ st.markdown('### 🔎 통합 검색 시스템')
 
 search_tab_chem, search_tab_vssl = st.tabs([
     '🧪 HNS 물질 및 사고상황 AI 검색',
-    '🚢 선박 제원 및 위치 직접 검색',
+    '🚢 선박 제원 및 위치 검색',
 ])
 
 # ------------------------------------------
-# [탭 1]: 화학물질 및 사고상황 AI 검색
+# [탭 1]: 화학물질 및 사고상황 AI 검색 (우측 검색 버튼 추가)
 # ------------------------------------------
 with search_tab_chem:
-  search_input = st.text_input(
-      '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예: 황산, H2SO4,'
-      ' LNG / 평택호 좌초로 질산 유출 중)',
-      key='global_search_box',
-  )
+  col_c1, col_c2 = st.columns([4, 1])
+  with col_c1:
+    search_input = st.text_input(
+        '화학물질명, 화학식, 관용명 또는 사고상황을 자유롭게 입력하세요 (예:'
+        ' 황산, H2SO4, LNG / 평택호 좌초로 질산 유출 중):',
+        key='global_search_box',
+    )
+  with col_c2:
+    st.markdown('<br>', unsafe_allow_html=True)
+    btn_chem_search = st.button(
+        '🔍 검색',
+        key='btn_trigger_chem_search',
+        use_container_width=True,
+    )
 
-  if search_input:
+  # 엔터 입력 또는 우측 검색 버튼 클릭 시 동작
+  if search_input and (
+      btn_chem_search
+      or st.session_state.get('last_searched_query') != search_input
+  ):
+    st.session_state['last_searched_query'] = search_input
     with st.spinner('Gemini AI가 입력 내용을 지능형 분석 중...'):
       mapped_result = map_search_query_with_gemini(search_input)
       mapped_ko = mapped_result.get('chem_ko', search_input)
@@ -1266,7 +1315,7 @@ with search_tab_chem:
           st.rerun()
 
 # ------------------------------------------
-# [탭 2]: 선박명 / 호출부호 직접 검색
+# [탭 2]: 선박 제원 및 위치 검색 (다중 선박 목록 선택 기능 완비)
 # ------------------------------------------
 with search_tab_vssl:
   col_v1, col_v2 = st.columns([4, 1])
@@ -1279,32 +1328,70 @@ with search_tab_vssl:
   with col_v2:
     st.markdown('<br>', unsafe_allow_html=True)
     btn_vssl_search = st.button(
-        '🔍 선박 조회',
+        '🔍 선박 검색',
         key='btn_direct_vssl_search',
         use_container_width=True,
     )
 
   if btn_vssl_search and vssl_query_input:
     clean_query = vssl_query_input.strip()
-    with st.spinner(f"해수부 API 선박 정보 조회 중 ('{clean_query}')..."):
-      # 선박명 또는 호출부호로 선박제원 API 조회
-      found_spec = fetch_vessel_spec_api(clean_query, clean_query)
+    with st.spinner(
+        f"해수부 선박제원 API에서 '{clean_query}' 관련 선박 검색 중..."
+    ):
+      vssl_list = fetch_vessel_spec_list_api(clean_query, max_results=50)
+      st.session_state['vssl_search_results'] = vssl_list
+      st.session_state['vssl_search_keyword'] = clean_query
 
-      if found_spec:
-        # 가상 선박 데이터 생성 후 모달 표출
-        dummy_vessel_obj = {
-            'vssl_nm': found_spec.get('vsslEngNm')
-            or found_spec.get('vsslKorNm')
-            or clean_query,
-            'clsgn': clean_query.upper(),
-            'laidup_fclty_nm': '직접 검색 선박',
-        }
-        show_vessel_detail_dialog(dummy_vessel_obj)
-      else:
-        st.warning(
-            f"💡 '{clean_query}'에 해당하는 선박 정보를 해수부 선박제원 API에서"
-            ' 찾을 수 없습니다. 선박명 철자 또는 호출부호를 확인해주세요.'
-        )
+  # 검색 결과가 세션에 있을 때 화면에 목록 표출
+  if 'vssl_search_results' in st.session_state:
+    results = st.session_state['vssl_search_results']
+    kw = st.session_state.get('vssl_search_keyword', '')
+
+    if not results:
+      st.warning(
+          f"💡 '{kw}'에 해당하는 선박 정보를 해수부 선박제원 API에서 찾을 수"
+          ' 없습니다. 철자를 확인해주세요.'
+      )
+    else:
+      st.success(
+          f"✅ '{kw}' 검색 결과 총 **{len(results)}**척의 선박이 검색되었습니다."
+          ' (최대 50척 표출)'
+      )
+
+      # 1. 단일 선택 드롭다운 필터
+      vssl_labels = [
+          f"🚢 [{s['vsslEngNm'] or s['vsslKorNm']}] 호출부호: {s['clsgn']} ｜"
+          f" IMO: {s['imoNo']} ｜ 국적: {s['vsslNlty']} ｜ 선종: {s['vsslKnd']}"
+          for s in results
+      ]
+      selected_vessel_label = st.selectbox(
+          '조회할 선박을 선택하세요:',
+          options=vssl_labels,
+          key='vssl_search_select_box',
+      )
+
+      # 선택된 선박 인덱스 추출 후 조회 버튼 제공
+      if selected_vessel_label:
+        sel_idx = vssl_labels.index(selected_vessel_label)
+        selected_spec = results[sel_idx]
+
+        st.markdown('<br>', unsafe_allow_html=True)
+        col_btn1, _ = st.columns([2, 3])
+        with col_btn1:
+          if st.button(
+              f"🔍 [{selected_spec['vsslEngNm'] or selected_spec['vsslKorNm']}]"
+              ' 선박제원 및 실시간 위치 상세 보기',
+              key='btn_open_searched_vessel_modal',
+              use_container_width=True,
+          ):
+            dummy_vessel_obj = {
+                'vssl_nm': selected_spec.get('vsslEngNm')
+                or selected_spec.get('vsslKorNm')
+                or kw,
+                'clsgn': selected_spec.get('clsgn', kw).upper(),
+                'laidup_fclty_nm': '선박 직접 검색 결과',
+            }
+            show_vessel_detail_dialog(dummy_vessel_obj)
 
 # ------------------------------------------
 # ⚡ AI 대응 가이드 출력 모달/컨테이너 (Vision 연동)
