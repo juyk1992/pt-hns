@@ -338,19 +338,24 @@ def _escape_html(text):
   return (text or '').replace('<', '&lt;').replace('>', '&gt;')
 
 
-# [수정 후] 볼드 문법 파싱 및 배지 키워드 확장
 def highlight_badges(text):
   text = _escape_html(text)
+
   # 1) **볼드** 문법 변환
   text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-  # 2) 핵심 수치 및 키워드 하이라이트 배지 처리
-  text = re.sub(
-      r'(Level\s?[A-D])', r'<span class="badge badge-red">\1</span>', text
+
+  # 2) 수치 / 단위 / 범위 하이라이트 (소수점 및 범위 기호 완벽 지원)
+  # 예: 1.1~7.0%, 50m, 27℃, 0.86, 100~800m 등 모두 매칭
+  number_unit_pattern = (
+      r'(\d+(?:\.\d+)?(?:\s*[\~～\-]\s*\d+(?:\.\d+)?)?\s*(?:m|미터|kts|℃|°C|%))'
   )
   text = re.sub(
-      r'(\d[\d,]*\s?(?:m|미터|kts|℃|°C|%))',
-      r'<span class="badge badge-blue">\1</span>',
-      text,
+      number_unit_pattern, r'<span class="badge badge-blue">\1</span>', text
+  )
+
+  # 3) 보호구 및 유해액체물질 등급
+  text = re.sub(
+      r'(Level\s?[A-D])', r'<span class="badge badge-red">\1</span>', text
   )
   text = re.sub(
       r'\b([XYZ]류)\b', r'<span class="badge badge-orange">\1</span>', text
@@ -360,6 +365,7 @@ def highlight_badges(text):
       r'<span class="badge badge-red">\1</span>',
       text,
   )
+
   return text
 
 
