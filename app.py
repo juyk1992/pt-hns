@@ -924,9 +924,33 @@ def fetch_chem_safety_info(cas_no):
 
 
 def fetch_kosha_msds_info(chem_name, cas_no, unno):
-  base_url = 'https://msds.kosha.or.kr/openapi/service/msdschem'
+  base_url = 'https://apis.data.go.kr/B552468/msdschem1'
   chem_id = None
+  last_error = None
   search_trials = [(cas_no, '1'), (unno, '2'), (chem_name, '0')]
+
+  def normalize_un_no(value):
+    digits = re.sub(r'\D', '', str(value or ''))
+    return digits.zfill(4) if digits else ''
+
+  def normalize_chem_name(value):
+    return re.sub(r'[\s·ㆍ]', '', str(value or '')).lower()
+
+  def get_api_error(root):
+    result_code = (
+        root.findtext('.//resultCode')
+        or root.findtext('.//returnReasonCode')
+        or ''
+    ).strip()
+    result_msg = (
+        root.findtext('.//resultMsg')
+        or root.findtext('.//returnAuthMsg')
+        or root.findtext('.//errMsg')
+        or ''
+    ).strip()
+    if result_code and result_code != '00':
+      return f'{result_code}: {result_msg or "알 수 없는 오류"}'
+    return None
 
   for search_wrd, search_cnd in search_trials:
     if not search_wrd or str(search_wrd).strip() in [
@@ -938,7 +962,7 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     ]:
       continue
     clean_wrd = str(search_wrd).strip()
-    list_url = f'{base_url}/getChemList'
+    list_url = f'{base_url}/getChemList001'
     params = {
         'serviceKey': PUBLIC_API_KEY,
         'searchWrd': clean_wrd,
@@ -948,15 +972,21 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
     }
     try:
       res = requests.get(list_url, params=params, timeout=5)
+      res.raise_for_status()
       root = ET.fromstring(res.content)
+      api_error = get_api_error(root)
+      if api_error:
+        last_error = api_error
+        continue
       items = root.findall('.//item')
       matched_id = None
       for item in items:
-        found_id = item.findtext('chemId') or item.findtext('chemId'.lower())
+        found_id = item.findtext('chemId')
         if not found_id:
           continue
         if search_cnd == '2':
-          if (item.findtext('unno') or '').strip() == clean_wrd.zfill(4):
+          found_un_no = normalize_un_no(item.findtext('unNo'))
+          if found_un_no == normalize_un_no(clean_wrd):
             matched_id = found_id.strip()
             break
         elif search_cnd == '1':
@@ -964,30 +994,34 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
             matched_id = found_id.strip()
             break
         elif search_cnd == '0':
-          item_ko = (item.findtext('chemKo') or '').strip().replace('·', '')
-          item_en = (
-              (item.findtext('chemEn') or '').strip().replace('·', '').lower()
-          )
-          target_wrd = clean_wrd.replace('·', '').lower()
-          if target_wrd == item_ko.lower() or target_wrd == item_en:
+          item_ko = item.findtext('chemNameKor') or ''
+          if normalize_chem_name(clean_wrd) == normalize_chem_name(item_ko):
             matched_id = found_id.strip()
             break
       if matched_id:
         chem_id = matched_id
         break
     except Exception as e:
+      last_error = str(e)
       print(f'KOSHA 에러: {e}')
 
   if not chem_id:
+    if last_error:
+      return f'안전보건공단 MSDS API 조회 실패 ({last_error})'
     return '안전보건공단 MSDS 연동 데이터 없음 (chemId 미발급)'
 
   msds_details = []
   for i in range(1, 17):
-    detail_url = f'{base_url}/getChemDetail{i:02d}'
+    detail_url = f'{base_url}/getChemDetail{i:02d}1'
     params = {'serviceKey': PUBLIC_API_KEY, 'chemId': chem_id}
     try:
       res = requests.get(detail_url, params=params, timeout=4)
+      res.raise_for_status()
       root = ET.fromstring(res.content)
+      api_error = get_api_error(root)
+      if api_error:
+        print(f'KOSHA 상세 API 에러 ({i}번): {api_error}')
+        continue
       for item in root.findall('.//item'):
         name_kor = (item.findtext('msdsItemNameKor') or '').strip()
         detail_val = (item.findtext('itemDetail') or '').strip()
