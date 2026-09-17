@@ -262,16 +262,28 @@ st.markdown(
     .mapping-pill .v { font-size: 0.95rem; font-weight: 800; color: var(--text-main) !important; margin-top: 2px; }
     .mapping-pill.accent .v { color: var(--accent-blue) !important; }
 
-    .metric-strip { display:flex; gap:12px; flex-wrap:wrap; margin: var(--space-2) 0 var(--space-6) 0; }
+    .metric-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 14px;
+        margin: var(--space-2) 0 var(--space-6) 0;
+    }
     .metric-card {
-        flex: 1 1 220px;
         background: var(--bg-card);
         border: 1px solid var(--border-color);
         border-radius: var(--radius-md);
-        padding: 14px 16px;
-        border-left: 4px solid var(--accent-blue);
+        padding: 16px 18px;
+        border-left: 5px solid var(--accent-blue);
         box-shadow: var(--shadow-sm);
     }
+    .metric-value { 
+        font-size: 0.95rem; 
+        font-weight: 500; 
+        color: var(--text-main) !important; 
+        line-height: 1.65;
+        word-break: keep-all; /* 단어 단위 줄바꿈으로 가독성 대폭 향상 */
+    }
+
     .metric-card.danger { border-left-color: var(--accent-red); }
     .metric-card.warning { border-left-color: var(--accent-orange); }
     .metric-card.success { border-left-color: var(--accent-green); }
@@ -336,15 +348,27 @@ def _escape_html(text):
   return (text or '').replace('<', '&lt;').replace('>', '&gt;')
 
 
+# [수정 후] 볼드 문법 파싱 및 배지 키워드 확장
 def highlight_badges(text):
-  """핵심요약 문장 내 이격거리(m), 보호구 레벨, X/Y/Z류 등을 배지로 강조."""
   text = _escape_html(text)
-  text = re.sub(r'(Level\s?[A-D])', r'<span class="badge badge-red">\1</span>', text)
+  # 1) **볼드** 문법 변환
+  text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+  # 2) 핵심 수치 및 키워드 하이라이트 배지 처리
   text = re.sub(
-      r'(\d[\d,]*\s?(?:m|미터|kts|℃|°C))', r'<span class="badge badge-blue">\1</span>', text
+      r'(Level\s?[A-D])', r'<span class="badge badge-red">\1</span>', text
+  )
+  text = re.sub(
+      r'(\d[\d,]*\s?(?:m|미터|kts|℃|°C|%))',
+      r'<span class="badge badge-blue">\1</span>',
+      text,
   )
   text = re.sub(
       r'\b([XYZ]류)\b', r'<span class="badge badge-orange">\1</span>', text
+  )
+  text = re.sub(
+      r'(절대\s*금지|즉각\s*퇴각)',
+      r'<span class="badge badge-red">\1</span>',
+      text,
   )
   return text
 
