@@ -279,6 +279,12 @@ st.markdown(
     .metric-card.success { border-left-color: var(--accent-green); }
     .metric-label { font-size:.72rem; font-weight:800; color:var(--text-sub) !important; letter-spacing:.02em; margin-bottom:5px; }
     .metric-value { font-size:.92rem; font-weight:600; color:var(--text-main) !important; line-height:1.55; }
+    .summary-action {
+        display:flex; align-items:flex-start; gap:7px; margin:5px 0; line-height:1.45;
+    }
+    .summary-dot {
+        flex:0 0 auto; font-weight:900; color:var(--accent-blue) !important; margin-top:1px;
+    }
 
     .badge {
         display:inline-block; padding: 1px 9px; border-radius: 999px;
@@ -370,31 +376,71 @@ def highlight_badges(text):
 
 
 def parse_ai_summary(raw_text):
-  """Gemini가 생성한 마크다운 응답을 [초동대응 핵심요약 bullets]와 [본문 섹션들]로 분리."""
+  """Gemini 응답에서 초동대응 핵심요약과 상세 섹션을 안정적으로 분리."""
   if not raw_text:
     return [], []
 
-  parts = re.split(r'\n###\s+', raw_text)
-  head = parts[0]
-  section_blocks = parts[1:]
-
-  bullet_pattern = re.compile(r'^\*\s*\*\*(.+?)\*\*[:：]\s*(.+)$')
+  expected_summary = [
+      ('RISK', '사고물질 및 위험성 판단'),
+      ('DISTANCE', '통제 및 이격거리 지시'),
+      ('PPE', '출동세력 보호구 지정'),
+      ('ACTION', '현장 초동 행동 수칙'),
+  ]
   bullets = []
-  for line in head.split('\n'):
-    line = line.strip()
-    m = bullet_pattern.match(line)
-    if m:
+
+  # 1) 신규 고정 SUMMARY 블록을 우선 파싱
+  summary_match = re.search(
+      r'\[INITIAL_SUMMARY\](.*?)\[/INITIAL_SUMMARY\]',
+      raw_text,
+      re.DOTALL | re.IGNORECASE,
+  )
+
+  if summary_match:
+    summary_text = summary_match.group(1)
+    for key, label in expected_summary:
+      m = re.search(
+          rf'^\s*{key}\s*[:：]\s*(.+?)(?=^\s*(?:RISK|DISTANCE|PPE|ACTION)\s*[:：]|\Z)',
+          summary_text,
+          re.MULTILINE | re.DOTALL | re.IGNORECASE,
+      )
+      if m:
+        value = ' '.join(m.group(1).strip().split())
+        bullets.append((label, value))
+
+  # 2) 기존 Markdown 형식도 계속 지원
+  if not bullets:
+    legacy_pattern = re.compile(
+        r'^\s*[-*•]?\s*\*{0,2}'
+        r'(사고물질 및 위험성 판단|통제 및 이격거리 지시|'
+        r'출동세력 보호구 지정|현장 초동 행동 수칙)'
+        r'\*{0,2}\s*[:：]\s*(.+)$',
+        re.MULTILINE,
+    )
+    for m in legacy_pattern.finditer(raw_text):
       bullets.append((m.group(1).strip(), m.group(2).strip()))
 
+  # 3) SUMMARY 블록을 제거한 뒤 상세 섹션 파싱
+  clean_text = re.sub(
+      r'\[INITIAL_SUMMARY\].*?\[/INITIAL_SUMMARY\]',
+      '',
+      raw_text,
+      flags=re.DOTALL | re.IGNORECASE,
+  )
+
+  section_pattern = re.compile(r'^###\s+(.+?)\s*$', re.MULTILINE)
+  matches = list(section_pattern.finditer(clean_text))
+
   sections = []
-  for block in section_blocks:
-    block = block.strip()
-    if not block:
+  for i, match in enumerate(matches):
+    title = match.group(1).strip()
+    if '초동대응 핵심요약' in title:
       continue
-    lines = block.split('\n', 1)
-    title = lines[0].strip()
-    body = lines[1].strip() if len(lines) > 1 else ''
-    sections.append((title, body))
+
+    start = match.end()
+    end = matches[i + 1].start() if i + 1 < len(matches) else len(clean_text)
+    body = clean_text[start:end].strip()
+    if body:
+      sections.append((title, body))
 
   return bullets, sections
 
@@ -406,26 +452,40 @@ def render_ai_summary(raw_text):
     st.markdown(raw_text)
     return
 
+  st.markdown(
+      '<div class="section-title" style="margin-top:0;">'
+      '<div class="icon-box">🚨</div><h3>초동대응 핵심요약</h3></div>',
+      unsafe_allow_html=True,
+  )
+
   if bullets:
-    st.markdown(
-        '<div class="section-title" style="margin-top:0;">'
-        '<div class="icon-box">🚨</div><h3>초동대응 핵심요약</h3></div>',
-        unsafe_allow_html=True,
-    )
     tone_cycle = ['danger', 'warning', 'primary', 'success']
     icon_cycle = ['🧪', '📏', '🦺', '🧭']
     html = '<div class="metric-strip">'
     for i, (label, value) in enumerate(bullets):
       tone = tone_cycle[i % len(tone_cycle)]
       icon = icon_cycle[i % len(icon_cycle)]
+      items = [item.strip() for item in value.split('|') if item.strip()]
+      items_html = ''.join(
+          f'<div class="summary-action">'
+          f'<span class="summary-dot">•</span>'
+          f'<span>{highlight_badges(item)}</span>'
+          f'</div>'
+          for item in items
+      )
       html += (
           f'<div class="metric-card {tone}">'
           f'<div class="metric-label">{icon} {label}</div>'
-          f'<div class="metric-value">{highlight_badges(value)}</div>'
+          f'<div class="metric-value">{items_html}</div>'
           '</div>'
       )
     html += '</div>'
     st.markdown(html, unsafe_allow_html=True)
+  else:
+    st.warning(
+        '초동대응 핵심요약을 구조화하지 못했습니다. '
+        '아래 상세 대응지침을 우선 확인하십시오.'
+    )
 
   for idx, (title, body) in enumerate(sections):
     with st.expander(title, expanded=(idx == 0)):
@@ -1126,18 +1186,30 @@ def generate_gemini_vision_summary(
         1. **데이터 출처별 역할 분담 (최우선 원칙)**:
            - **화학물질의 특성, 성상, 유해성, 증상, MSDS 수치**: 해양수산부 위험물정보, 화학물질안전원, 안전보건공단 API를 통해 수집된 데이터를 최우선으로 반영하여 정확한 물질 정보를 기재하세요.
            - **현장 대응, 초동 이격 거리, 대피 거리, 개인 보호구, 방제 및 소화 요령**: 해경 HNS 정보집 원본 이미지 및 해경 HNS 대응가이드(RAG) 이미지에 기재된 지침을 최우선으로 반영하여 현장 실행 위주로 작성하세요. (근본적인 물질 스펙은 전문 기관 API를 따르고, 실전 대응 전략은 해경 전문 가이드를 따를 것)
-        2. **초동대응 핵심요약 작성**: 각 항목의 시작은 `* **항목명**:` 포맷을 사용하고, 현장 세력이 즉시 이해할 수 있는 명확한 개조식 문장으로 작성하세요.
+        2. **초동대응 핵심요약 작성 — 절대 생략 금지**:
+           - 모든 응답에는 반드시 초동대응 핵심요약 4개 항목을 작성할 것.
+           - 아래 `[INITIAL_SUMMARY]` ~ `[/INITIAL_SUMMARY]` 블록을 반드시 출력할 것.
+           - 각 항목은 반드시 정확히 RISK, DISTANCE, PPE, ACTION 키를 사용할 것.
+           - 각 항목의 내용은 현장 지휘자가 5초 안에 읽을 수 있도록 핵심 행동지침 2~3개만 작성할 것.
+           - 각 행동지침은 ` | ` 기호로 구분할 것.
+           - 장문의 설명문이나 서술형 문단을 작성하지 말 것.
+           - 확인되지 않은 수치나 정보를 임의로 생성하지 말 것.
+           - 자료에 없는 정보는 `자료 확인 필요`라고 명시할 것.
         3. **예외 및 안전 보완 기준**: 
            - 물질명 미확인 시 기본 유출 100m / 화재 800m 이격 조치를 지정하세요.
            - 물 반응성 물질 확인 시 직사주수 절대 금지 및 분무(안개) 주수 지침을 명시하세요.
-        4. **출력 형식 엄격 준수**: 공문서 서식(수신, 발신 등)을 절대 생성하지 말고, 반드시 `### 🚨 [초동대응 핵심요약]` 제목부터 곧바로 출력을 시작하세요.
+        4. **출력 형식 엄격 준수**:
+           - 반드시 아래 `[INITIAL_SUMMARY]` 블록부터 시작할 것.
+           - INITIAL_SUMMARY 블록을 생략하거나 다른 위치로 이동하지 말 것.
+           - 그 뒤에 상세 섹션 1~4를 작성할 것.
+           - 공문서 서식(수신, 발신 등)은 생성하지 말 것.
 
-        ### 🚨 [초동대응 핵심요약]
-
-        * **사고물질 및 위험성 판단**: [IMDG 등급, 유해액체물질 분류(X/Y/Z류) 및 핵심위험성(인화성/독성/수반응성 등) 전파 및 위험성 평가 지시]
-        * **통제 및 이격거리 지시**: [초기이격, 화재대피, 유출방호 M단위 수치 명시 및 해역/현장 통제 조치 지시]
-        * **출동세력 보호구 지정**: [필수 레벨(Level A/B/C/D) 및 필수 장비(공기호흡기, 내화학복, 가스탐지기 등) 착용 지시]
-        * **현장 초동 행동 수칙**: [풍상위치 확보, 사고유형 맞춤 행동, 직수금지/소화약제 및 사고선 비상조치 확인 지시]
+        [INITIAL_SUMMARY]
+        RISK: [물질명/IMDG 등급/유해액체물질 분류/핵심 위험 2~3개] | [해상거동 또는 최우선 경고]
+        DISTANCE: [초기 이격거리] | [화재·유출 시 확대거리] | [풍상측 통제지침]
+        PPE: [보호구 Level] | [공기호흡기·화학보호복 등 필수장비] | [탐지장비]
+        ACTION: [풍상측 접근] | [사고유형별 최우선 행동] | [금지사항 또는 소화·방제 핵심지침]
+        [/INITIAL_SUMMARY]
 
         ---
         ### 1. ⚠️ 물리·화학적 성상 및 주요 위험성
