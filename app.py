@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
+import time
 import urllib3
 import xml.etree.ElementTree as ET
 import folium
@@ -353,7 +354,7 @@ def highlight_badges(text):
   # 2) 수치 / 단위 / 범위 하이라이트 (소수점 및 범위 기호 완벽 지원)
   # 예: 1.1~7.0%, 50m, 27℃, 0.86, 100~800m 등 모두 매칭
   number_unit_pattern = (
-      r'(\d+(?:\.\d+)?(?:\s*[\~～\-]\s*\d+(?:\.\d+)?)?\s*(?:m|미터|kts|℃|°C|%))'
+      r'(\d+(?:\.\d+)?(?:\s*[\~～\-]\s*\d+(?:\.\d+)?)?\s*(?:%LEL|vol%|m|미터|kts|℃|°C|%))'
   )
   text = re.sub(
       number_unit_pattern, r'<span class="badge badge-blue">\1</span>', text
@@ -666,10 +667,29 @@ def fetch_rag_context_and_images(query, k=5):
 # ==========================================
 
 
+class VesselAPIError(RuntimeError):
+  """선박 공공 API의 통신·인증·응답 오류."""
+
+
+def _api_result_error(root):
+  """공공데이터 XML 응답의 오류를 사용자 표시용 문구로 변환."""
+  result_code = (root.findtext('.//resultCode') or '').strip()
+  result_msg = (root.findtext('.//resultMsg') or '').strip()
+  return_reason = (root.findtext('.//returnReasonCode') or '').strip()
+  return_auth_msg = (root.findtext('.//returnAuthMsg') or '').strip()
+  error_msg = (root.findtext('.//errMsg') or '').strip()
+
+  if result_code and result_code not in {'0', '00'}:
+    return f'{result_code}: {result_msg or "응답 오류"}'
+  if return_reason and return_reason not in {'0', '00'}:
+    return f'{return_reason}: {return_auth_msg or error_msg or "응답 오류"}'
+  return ''
+
+
 @st.cache_data(ttl=300)
 def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
   if not PUBLIC_API_KEY:
-    return []
+    raise VesselAPIError('공공데이터 API 키가 설정되지 않았습니다.')
   url = f'https://apis.data.go.kr/1192000/VsslEtrynd5/Info5?serviceKey={PUBLIC_API_KEY}'
   headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
   vessels, page, rows_per_page = [], 1, 50
@@ -687,13 +707,22 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
       session = requests.Session()
       session.verify = False
       res = session.get(url, params=params, headers=headers, timeout=10)
-      if res.status_code == 200 and res.content:
-        root = ET.fromstring(res.content)
-        total_cnt = int(root.findtext('.//totalCount', '0'))
-        items = root.findall('.//item') or root.findall('body/items/item')
-        if not items:
-          break
-        for item in items:
+      if res.status_code != 200:
+        raise VesselAPIError(f'HTTP {res.status_code} 응답 오류')
+      if not res.content:
+        raise VesselAPIError('빈 응답이 수신되었습니다.')
+
+      root = ET.fromstring(res.content)
+      result_error = _api_result_error(root)
+      if result_error:
+        raise VesselAPIError(result_error)
+
+      total_cnt = int(root.findtext('.//totalCount', '0'))
+      items = root.findall('.//item') or root.findall('body/items/item')
+      if not items:
+        break
+
+      for item in items:
           prt_ag_nm = (item.findtext('prtAgNm') or '-').strip()
           etrypt_year = (item.findtext('etryptYear') or '-').strip()
           etrypt_co = (item.findtext('etryptCo') or '-').strip()
@@ -708,12 +737,24 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
           nxlnpt_prt_nm = (item.findtext('nxlnptPrtNm') or '-').strip()
           dstn_prt_nm = (item.findtext('dstnPrtNm') or '-').strip()
 
-          detail_node = item.find('.//detail') or item.find('details/detail')
+          detail_nodes = item.findall('.//detail') or item.findall(
+              'details/detail'
+          )
+          expected_etrynd = '입항' if str(de_gb).upper() == 'I' else '출항'
+          detail_node = next(
+              (
+                  node
+                  for node in detail_nodes
+                  if expected_etrynd
+                  in (node.findtext('etryndNm') or '').strip()
+              ),
+              detail_nodes[0] if detail_nodes else None,
+          )
           reqst_se_nm = etrynd_nm = etrypt_dt = tkoff_dt = ibobprt_nm = (
               laidup_fclty_nm
           ) = ldadng_frght_cl_cd = ldadng_ton = trnpdt_ton = landng_frght_ton = (
               ld_frght_ton
-          ) = grtg = satmnt_entrps_nm = crew_co = tkoff_prrrn_dt = (
+          ) = grtg = satmnt_entrps_nm = crew_co = mr_num = tkoff_prrrn_dt = (
               dstn_etrypt_dt
           ) = '-'
 
@@ -740,6 +781,7 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
                 detail_node.findtext('satmntEntrpsNm') or '-'
             ).strip()
             crew_co = (detail_node.findtext('crewCo') or '-').strip()
+            mr_num = (detail_node.findtext('mrNum') or '-').strip()
             tkoff_prrrn_dt = (
                 detail_node.findtext('tkoffPrrrnDt') or '-'
             ).strip()
@@ -777,19 +819,20 @@ def fetch_vessel_schedule_api(port_code, de_gb, sde_str, ede_str):
               'grtg': grtg,
               'satmnt_entrps_nm': satmnt_entrps_nm,
               'crew_co': crew_co,
+              'mr_num': mr_num,
               'tkoff_prrrn_dt': tkoff_prrrn_dt,
               'dstn_etrypt_dt': dstn_etrypt_dt,
               'reqst_se_nm': reqst_se_nm,
           })
 
-        if len(vessels) >= total_cnt or len(items) < rows_per_page:
-          break
-        page += 1
-      else:
+      if len(vessels) >= total_cnt or len(items) < rows_per_page:
         break
+      page += 1
+    except VesselAPIError:
+      raise
     except Exception as e:
       print(f'선박 API 예외 ({port_code}/{de_gb}): {e}')
-      break
+      raise VesselAPIError(f'선박 입출항 API 처리 오류: {e}') from e
 
   return vessels
 
@@ -960,8 +1003,10 @@ def fetch_kosha_msds_info(chem_name, cas_no, unno):
 
 @st.cache_data(ttl=300)
 def fetch_vessel_spec_list_api(query_str, max_results=50):
-  if not PUBLIC_API_KEY or not query_str:
+  if not query_str:
     return []
+  if not PUBLIC_API_KEY:
+    raise VesselAPIError('공공데이터 API 키가 설정되지 않았습니다.')
 
   url = f'https://apis.data.go.kr/1192000/SicsVsslManp3/Info3?serviceKey={PUBLIC_API_KEY}'
   headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -982,78 +1027,172 @@ def fetch_vessel_spec_list_api(query_str, max_results=50):
         session = requests.Session()
         session.verify = False
         res = session.get(url, params=params, headers=headers, timeout=8)
-        if res.status_code == 200 and res.content:
-          root = ET.fromstring(res.content)
-          items = root.findall('.//item') or root.findall('body/items/item')
-          if not items:
-            break
+        if res.status_code != 200:
+          raise VesselAPIError(f'HTTP {res.status_code} 응답 오류')
+        if not res.content:
+          raise VesselAPIError('빈 응답이 수신되었습니다.')
 
-          for item in items:
-            kor_name = (item.findtext('vsslKorNm') or '').strip() or '-'
-            eng_name = (item.findtext('vsslEngNm') or '').strip() or '-'
+        root = ET.fromstring(res.content)
+        result_error = _api_result_error(root)
+        if result_error:
+          raise VesselAPIError(result_error)
 
-            if eng_name != '-' and kor_name != '-':
-              if eng_name.upper() == kor_name.upper():
-                display_name = eng_name
-              else:
-                display_name = f'{eng_name} ({kor_name})'
-            elif eng_name != '-':
-              display_name = eng_name
-            elif kor_name != '-':
-              display_name = kor_name
-            else:
-              display_name = '-'
-
-            spec = {
-                'vsslNo': (item.findtext('vsslNo') or '').strip() or '-',
-                'imoNo': (item.findtext('imoNo') or '').strip() or '-',
-                'mmsiNo': (item.findtext('mmsiNo') or '').strip() or '-',
-                'clsgn': (item.findtext('clsgn') or '').strip() or '-',
-                'vsslKorNm': kor_name,
-                'vsslEngNm': eng_name,
-                'displayName': display_name,
-                'vsslKnd': (item.findtext('vsslKnd') or '').strip() or '-',
-                'vsslNlty': (item.findtext('vsslNlty') or '').strip() or '-',
-                'grtg': (item.findtext('grtg') or '').strip() or '-',
-                'vsslTotLt': (item.findtext('vsslTotLt') or '').strip() or '-',
-                'shdth': (item.findtext('shdth') or '').strip() or '-',
-                'vsslDrft': (item.findtext('vsslDrft') or '').strip() or '-',
-                'vsslDp': (item.findtext('vsslDp') or '').strip() or '-',
-                'brbtSeNm': (item.findtext('brbtSeNm') or '').strip() or '-',
-                'nvgShapNm': (item.findtext('nvgShapNm') or '').strip() or '-',
-                'vsslCnstrDt': (
-                    (item.findtext('vsslCnstrDt') or '-')
-                    .strip()
-                    .replace('T', ' ')
-                ),
-            }
-            if not any(
-                r['clsgn'] == spec['clsgn']
-                and r['vsslKorNm'] == spec['vsslKorNm']
-                for r in results
-            ):
-              results.append(spec)
-
-          if len(items) < 50:
-            break
-          page += 1
-        else:
+        items = root.findall('.//item') or root.findall('body/items/item')
+        if not items:
           break
+
+        for item in items:
+          kor_name = (item.findtext('vsslKorNm') or '').strip() or '-'
+          eng_name = (item.findtext('vsslEngNm') or '').strip() or '-'
+
+          if eng_name != '-' and kor_name != '-':
+            if eng_name.upper() == kor_name.upper():
+              display_name = eng_name
+            else:
+              display_name = f'{eng_name} ({kor_name})'
+          elif eng_name != '-':
+            display_name = eng_name
+          elif kor_name != '-':
+            display_name = kor_name
+          else:
+            display_name = '-'
+
+          spec = {
+              'vsslNo': (item.findtext('vsslNo') or '').strip() or '-',
+              'imoNo': (item.findtext('imoNo') or '').strip() or '-',
+              # 일부 운영 응답에 존재할 경우에만 활용한다. 공식 가이드의
+              # 기본 응답 필드는 아니므로 없으면 '-'로 유지한다.
+              'mmsiNo': (item.findtext('mmsiNo') or '').strip() or '-',
+              'clsgn': (item.findtext('clsgn') or '').strip() or '-',
+              'vsslKorNm': kor_name,
+              'vsslEngNm': eng_name,
+              'displayName': display_name,
+              'vsslKnd': (item.findtext('vsslKnd') or '').strip() or '-',
+              'vsslNlty': (item.findtext('vsslNlty') or '').strip() or '-',
+              'grtg': (item.findtext('grtg') or '').strip() or '-',
+              'vsslTotLt': (item.findtext('vsslTotLt') or '').strip() or '-',
+              'shdth': (item.findtext('shdth') or '').strip() or '-',
+              'vsslDrft': (item.findtext('vsslDrft') or '').strip() or '-',
+              'vsslDp': (item.findtext('vsslDp') or '').strip() or '-',
+              'brbtSeNm': (item.findtext('brbtSeNm') or '').strip() or '-',
+              'nvgShapNm': (item.findtext('nvgShapNm') or '').strip() or '-',
+              'vsslCnstrDt': (
+                  (item.findtext('vsslCnstrDt') or '-')
+                  .strip()
+                  .replace('T', ' ')
+              ),
+          }
+          dedupe_key = (
+              spec['vsslNo'],
+              spec['imoNo'],
+              spec['clsgn'].upper(),
+              spec['vsslKorNm'].upper(),
+              spec['vsslEngNm'].upper(),
+          )
+          if not any(r['_dedupe_key'] == dedupe_key for r in results):
+            spec['_dedupe_key'] = dedupe_key
+            results.append(spec)
+            if len(results) >= max_results:
+              break
+
+        if len(items) < 50 or len(results) >= max_results:
+          break
+        page += 1
+      except VesselAPIError:
+        raise
       except Exception as e:
         print(f'선박제원 다중목록 조회 에러: {e}')
-        break
+        raise VesselAPIError(f'선박제원 API 처리 오류: {e}') from e
 
-    if results:
+    if len(results) >= max_results:
       break
 
+  for spec in results:
+    spec.pop('_dedupe_key', None)
+
+  normalized_query = _normalize_vessel_text(clean_q)
+  results.sort(
+      key=lambda spec: _vessel_spec_match_score(spec, normalized_query)
+  )
   return results
 
 
+def _normalize_vessel_text(value):
+  return re.sub(r'[^0-9A-Z가-힣]', '', str(value or '').strip().upper())
+
+
+def _vessel_spec_match_score(spec, normalized_query):
+  if not normalized_query:
+    return 99
+
+  identifiers = [
+      _normalize_vessel_text(spec.get('clsgn')),
+      _normalize_vessel_text(spec.get('vsslNo')),
+      _normalize_vessel_text(spec.get('imoNo')),
+      _normalize_vessel_text(spec.get('mmsiNo')),
+  ]
+  names = [
+      _normalize_vessel_text(spec.get('vsslKorNm')),
+      _normalize_vessel_text(spec.get('vsslEngNm')),
+  ]
+
+  if normalized_query in [value for value in identifiers if value]:
+    return 0
+  if normalized_query in [value for value in names if value]:
+    return 1
+  if any(
+      normalized_query in value or value in normalized_query
+      for value in names
+      if value
+  ):
+    return 10
+  return 99
+
+
 def fetch_vessel_spec_api(clsgn, vssl_nm):
-  specs = fetch_vessel_spec_list_api(clsgn) or fetch_vessel_spec_list_api(
-      vssl_nm
-  )
-  return specs[0] if specs else None
+  target_clsgn = _normalize_vessel_text(clsgn)
+  target_name = _normalize_vessel_text(vssl_nm)
+  queries = []
+  for value in (clsgn, vssl_nm):
+    if value and str(value).strip() not in {'-', '없음'}:
+      if value not in queries:
+        queries.append(value)
+
+  specs = []
+  seen = set()
+  for query in queries:
+    for spec in fetch_vessel_spec_list_api(query):
+      key = (
+          spec.get('vsslNo'),
+          spec.get('imoNo'),
+          spec.get('clsgn'),
+          spec.get('vsslKorNm'),
+          spec.get('vsslEngNm'),
+      )
+      if key not in seen:
+        seen.add(key)
+        specs.append(spec)
+
+  exact_callsign = [
+      spec
+      for spec in specs
+      if target_clsgn
+      and target_clsgn == _normalize_vessel_text(spec.get('clsgn'))
+  ]
+  if exact_callsign:
+    return exact_callsign[0]
+
+  exact_name = [
+      spec
+      for spec in specs
+      if target_name
+      and target_name
+      in {
+          _normalize_vessel_text(spec.get('vsslKorNm')),
+          _normalize_vessel_text(spec.get('vsslEngNm')),
+      }
+  ]
+  return exact_name[0] if exact_name else None
 
 
 # ==========================================
@@ -1215,10 +1354,15 @@ def generate_gemini_vision_summary(
            - 방제정·방제세력은 물질 거동에 맞는 확산방지·회수, 누출원 통제 지원, 회수물 보관 및 오염장비 제독을 중심으로 작성할 것.
            - 해당 세력이 수행하기 부적절하거나 위험한 작업은 `대기·통제·지원` 임무로 제한할 것.
 
-        5. **현장통제·탐지·재평가**:
+        5. **현장통제·탐지·LEL 표기·재평가**:
            - 풍상측과 조류 상류측을 함께 고려하여 접근방향을 제시하고, Hot/Warm/Cold Zone 또는 이에 준하는 위험구역을 구분할 것.
            - 이격거리와 대피거리는 유출·대량유출·화재·탱크화재 등 적용 조건을 구분하고, 근거자료가 없는 수치를 생성하지 말 것.
            - 산소, LEL, PID/VOC 또는 물질별 탐지값과 풍향·조류 변화에 따른 작업중지 기준 및 통제구역 재설정 지시를 포함할 것.
+           - 물질 고유의 폭발범위는 반드시 `LEL [하한값] vol% ~ UEL [상한값] vol%`처럼 공기 중 체적농도와 LEL·UEL을 함께 표시할 것. 확인된 물질별 값만 사용하고, UEL 수치를 허용기준이나 철수기준으로 사용하지 말 것.
+           - 가연성가스 검지기 측정값은 반드시 `10%LEL`, `20%LEL`처럼 `%LEL` 단위로 작성할 것. `LEL 10%`, `10%`, `20%`처럼 체적농도와 혼동되는 표현은 절대 사용하지 말 것.
+           - 기관 SOP·현장지휘관 지시·측정기 경보값 또는 근거자료가 더 엄격하면 그 기준을 우선할 것. 별도 근거가 없을 때는 `10%LEL 이상: 일반작업 즉시 중지·비필수 인원 철수·점화원 차단`, `20%LEL 이상 또는 농도 급상승: Hot Zone 전원 즉시 철수·통제구역 확대`로 단계화할 것.
+           - LEL 검지값과 독성 노출기준은 서로 대체하지 말 것. TWA·STEL·IDLH는 ppm 단위로 별도 평가하고, 독성기준이 더 먼저 도달하면 독성기준을 우선 적용할 것. LEL 검지값이 낮거나 미검출이어도 호흡 안전으로 판단하지 말 것.
+           - ppm과 %LEL의 환산은 해당 물질의 신뢰 가능한 LEL 값과 검지기 교정조건이 확인된 경우에만 제시하고, 근거 없이 계산하지 말 것.
            - 보호구 하향은 현장 측정과 OSC 승인 전에는 지시하지 말 것.
 
         6. **상황전파·지원요청**:
@@ -1238,7 +1382,7 @@ def generate_gemini_vision_summary(
 
         [INITIAL_SUMMARY]
         RISK: [물질·사고유형·인명상황] | [화재·독성·반응성·해상거동 중 최우선 위험] | [즉시 확인할 미확인 핵심정보]
-        DISTANCE: [풍상·조류 상류측 접근방향] | [조건별 초기 통제·대피거리] | [진입 금지 또는 작업 중지 기준]
+        DISTANCE: [풍상·조류 상류측 접근방향] | [조건별 초기 통제·대피거리] | [가스검지기 값은 10%LEL 형식으로 표시한 진입 금지·작업 중지 기준]
         PPE: [요구조자 유무와 구조 우선순위] | [진입조 보호구·탐지·예비조 조건] | [제독 후 의료 인계]
         ACTION: 함정: [통항통제·안전측 감시·구조지원 첫 임무] | 구조대: [탐지·진입·인명구조 첫 임무] | 파출소: [육상통제·인원확인·자료확보 첫 임무] | 방제정: [물질거동에 맞는 확산방지·회수 첫 임무]
         [/INITIAL_SUMMARY]
@@ -1284,7 +1428,7 @@ def generate_gemini_vision_summary(
 
 
 def fetch_aisstream_vessel_position(
-    vssl_nm='', clsgn='', imo_no='', timeout_sec=4
+    vssl_nm='', clsgn='', mmsi_no='', timeout_sec=4
 ):
   if not AISSTREAM_API_KEY:
     return None
@@ -1294,69 +1438,83 @@ def fetch_aisstream_vessel_position(
       'BoundingBoxes': [[[34.0, 124.0], [38.5, 128.5]]],
   }
 
-  position_data = None
-  target_nm = str(vssl_nm).strip().upper()
-  target_clsgn = str(clsgn).strip().upper()
+  target_nm = _normalize_vessel_text(vssl_nm)
+  target_clsgn = _normalize_vessel_text(clsgn)
+  target_mmsi = re.sub(r'\D', '', str(mmsi_no or ''))
+  if target_mmsi:
+    subscribe_message['FiltersShipMMSI'] = [target_mmsi]
 
-  def on_open(ws):
-    ws.send(json.dumps(subscribe_message))
+  if not any((target_nm, target_clsgn, target_mmsi)):
+    return None
 
-  def on_message(ws, message):
-    nonlocal position_data
-    try:
-      data = json.loads(message)
-      msg_type = data.get('MessageType')
-      metadata = data.get('MetaData', {})
-
-      if msg_type == 'PositionReport':
-        recv_ship_name = str(metadata.get('ShipName', '')).strip().upper()
-        recv_clsgn = str(metadata.get('CallSign', '')).strip().upper()
-        pos = data.get('Message', {}).get('PositionReport', {})
-
-        match_found = False
-        if target_clsgn and target_clsgn != '-' and target_clsgn == recv_clsgn:
-          match_found = True
-        elif (
-            target_nm
-            and target_nm != '-'
-            and (target_nm in recv_ship_name or recv_ship_name in target_nm)
-        ):
-          match_found = True
-
-        if match_found:
-          position_data = {
-              'lat': pos.get('Latitude'),
-              'lon': pos.get('Longitude'),
-              'sog': pos.get('Sog', 0.0),
-              'cog': pos.get('Cog', 0.0),
-              'time_utc': metadata.get('time_utc', ''),
-              'ship_name': metadata.get('ShipName', '-'),
-              'mmsi': metadata.get('MMSI', '-'),
-          }
-          ws.close()
-    except Exception as e:
-      print(f'AISStream 파싱 예외: {e}')
-
-  def on_error(ws, error):
-    print(f'AISStream 에러: {error}')
-
+  ws = None
   try:
-    ws = websocket.WebSocketApp(
-        'wss://stream.aisstream.io/v0/stream',
-        on_open=on_open,
-        on_message=on_message,
-        on_error=on_error,
+    ws = websocket.create_connection(
+        'wss://stream.aisstream.io/v0/stream', timeout=timeout_sec
     )
-    ws.run_forever(ping_timeout=timeout_sec)
+    ws.send(json.dumps(subscribe_message))
+    deadline = time.monotonic() + timeout_sec
+
+    while time.monotonic() < deadline:
+      remaining = max(0.1, deadline - time.monotonic())
+      ws.settimeout(remaining)
+      message = ws.recv()
+      if not message:
+        continue
+
+      data = json.loads(message)
+      if data.get('MessageType') != 'PositionReport':
+        continue
+
+      metadata = data.get('MetaData', {})
+      recv_ship_name = _normalize_vessel_text(metadata.get('ShipName'))
+      recv_clsgn = _normalize_vessel_text(metadata.get('CallSign'))
+      recv_mmsi = re.sub(r'\D', '', str(metadata.get('MMSI', '')))
+
+      matched_by = ''
+      if target_mmsi and recv_mmsi and target_mmsi == recv_mmsi:
+        matched_by = 'MMSI 완전일치'
+      elif target_clsgn and recv_clsgn and target_clsgn == recv_clsgn:
+        matched_by = '호출부호 완전일치'
+      elif target_nm and recv_ship_name and target_nm == recv_ship_name:
+        matched_by = '선박명 완전일치'
+
+      if not matched_by:
+        continue
+
+      pos = data.get('Message', {}).get('PositionReport', {})
+      return {
+          'lat': pos.get('Latitude'),
+          'lon': pos.get('Longitude'),
+          'sog': pos.get('Sog', 0.0),
+          'cog': pos.get('Cog', 0.0),
+          'time_utc': metadata.get('time_utc', ''),
+          'ship_name': metadata.get('ShipName', '-'),
+          'mmsi': metadata.get('MMSI', '-'),
+          'matched_by': matched_by,
+      }
+  except websocket.WebSocketTimeoutException:
+    return None
   except Exception as e:
     print(f'AISStream 연결 실패: {e}')
+  finally:
+    if ws is not None:
+      try:
+        ws.close()
+      except Exception:
+        pass
 
-  return position_data
+  return None
 
 
 # ==========================================
 # 🚢 모달 팝업: 선박 제원 및 실시간 위치
 # ==========================================
+
+
+def _valid_imo_for_link(value):
+  digits = re.sub(r'\D', '', str(value or ''))
+  return digits if len(digits) == 7 else ''
 
 
 @st.dialog('🚢 선박 제원 및 실시간 AIS 위치 정보', width='large')
@@ -1371,7 +1529,16 @@ def show_vessel_detail_dialog(v):
   with col_left:
     with st.container(border=True):
       st.markdown('#### 📐 선박 제원 스펙 정보')
-      spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+      spec_info = v.get('spec_info')
+      spec_error = ''
+      if not spec_info:
+        try:
+          spec_info = fetch_vessel_spec_api(v['clsgn'], v['vssl_nm'])
+        except VesselAPIError as e:
+          spec_error = str(e)
+
+      if spec_error:
+        st.error(f'선박제원 API 조회 실패: {spec_error}')
 
       if spec_info:
         kor_nm = spec_info.get('vsslKorNm', '-')
@@ -1411,23 +1578,35 @@ def show_vessel_detail_dialog(v):
             f' {spec_info["brbtSeNm"]}'
         )
         st.write(f"- **건조일시:** {spec_info['vsslCnstrDt']}")
-      else:
+      elif not spec_error:
         st.warning('💡 해수부 API에 등록된 선박제원 스펙이 없습니다.')
 
   with col_right:
     with st.container(border=True):
       st.markdown('#### 🛰️ 실시간 AIS 위치 및 지도')
       imo_number = spec_info.get('imoNo', '-') if spec_info else '-'
+      mmsi_number = spec_info.get('mmsiNo', '-') if spec_info else '-'
+      ais_vessel_name = v['vssl_nm']
+      if spec_info:
+        ais_vessel_name = (
+            spec_info.get('vsslEngNm')
+            if spec_info.get('vsslEngNm') not in {'', '-', None}
+            else spec_info.get('vsslKorNm', v['vssl_nm'])
+        )
 
       with st.spinner('AISStream 신호 탐색 중...'):
         ais_pos = fetch_aisstream_vessel_position(
-            vssl_nm=v['vssl_nm'],
+            vssl_nm=ais_vessel_name,
             clsgn=v['clsgn'],
-            imo_no=imo_number,
+            mmsi_no=mmsi_number,
             timeout_sec=3,
         )
 
-      if ais_pos and ais_pos.get('lat') and ais_pos.get('lon'):
+      if (
+          ais_pos
+          and ais_pos.get('lat') is not None
+          and ais_pos.get('lon') is not None
+      ):
         lat, lon = ais_pos['lat'], ais_pos['lon']
         sog, cog = ais_pos['sog'], ais_pos['cog']
         time_utc = ais_pos['time_utc']
@@ -1437,6 +1616,10 @@ def show_vessel_detail_dialog(v):
         )
         st.write(f'- **속력(SOG):** {sog} kts ｜ **침로(COG):** {cog}°')
         st.write(f'- **수신시각(UTC):** {time_utc}')
+        st.write(
+            f"- **식별근거:** {ais_pos.get('matched_by', '-')} ｜ "
+            f"**AIS MMSI:** `{ais_pos.get('mmsi', '-')}`"
+        )
 
         m = folium.Map(location=[lat, lon], zoom_start=13)
         folium.Marker(
@@ -1450,17 +1633,18 @@ def show_vessel_detail_dialog(v):
         components.html(map_html, height=280)
       else:
         st.info(
-            '💡 실시간 AIS 신호가 수신되지 않았습니다. (AISStream 서버 응답'
-            ' 대기 중)'
+            '💡 제한시간 내 대상 선박과 식별값이 완전히 일치하는 AIS 신호를 '
+            '수신하지 못했습니다.'
         )
 
         facility_nm = v.get('laidup_fclty_nm', '-')
         st.write(f'- **PORT-MIS 신고 계선장소:** `{facility_nm}`')
 
-        if imo_number and imo_number not in ['-', '0000', '없음', '']:
-          mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{imo_number}'
+        valid_imo = _valid_imo_for_link(imo_number)
+        if valid_imo:
+          mt_link = f'https://www.marinetraffic.com/en/ais/details/ships/imo:{valid_imo}'
           st.markdown(
-              f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {imo_number})"
+              f"🔗 **[MarineTraffic에서 `{v['vssl_nm']}` (IMO: {valid_imo})"
               f' 실시간 위치 상세 보기]({mt_link})**'
           )
         else:
@@ -1514,15 +1698,22 @@ def render_vessel_item_card(v, port_code, idx):
       st.write(f"- **신고업체명:** {v['satmnt_entrps_nm']}")
 
     with col3:
-      st.markdown('**🧭 항로 및 화물 명세**')
+      st.markdown('**🧭 항로 및 신고화물 정보**')
       st.write(f"- **전출항지항구명:** {v['prvs_dpmprt_prt_nm']}")
       st.write(f"- **차출항지항구명:** {v['nxlnpt_prt_nm']}")
       st.write(f"- **목적지항구명:** {v['dstn_prt_nm']}")
-      st.write(f"- **화물명세 (코드):** {v['ldadng_frght_cl_cd']}")
-      st.write(f"- **적재톤수:** {v['ldadng_ton']} 톤")
+      st.write(
+          f"- **PORT-MIS 화물명세 코드:** {v['ldadng_frght_cl_cd']}"
+      )
+      st.write(f"- **적하목록관리번호:** {v.get('mr_num', '-')}")
+      st.write(f"- **신고 적재톤수:** {v['ldadng_ton']} 톤")
       st.write(f"- **환적톤수:** {v['trnpdt_ton']} 톤")
       st.write(f"- **양하화물톤:** {v['landng_frght_ton']} 톤")
       st.write(f"- **적하화물톤:** {v['ld_frght_ton']} 톤")
+      st.caption(
+          '※ 화물명세 코드는 실제 HNS 물질명·UN번호를 뜻하지 않습니다. '
+          '위험물 적하목록·MSDS·적하목록관리번호를 별도로 확인하십시오.'
+      )
 
     st.markdown('---')
     if st.button(
@@ -1554,8 +1745,12 @@ def render_combined_port_tab_content(port_name, port_code):
 
   state_key_fetched = f'fetched_{port_code}'
 
+  if start_date > end_date:
+    st.error('조회 시작일은 종료일보다 늦을 수 없습니다.')
+    return
+
   if query_trigger:
-    st.cache_data.clear()
+    fetch_vessel_schedule_api.clear()
     st.session_state[state_key_fetched] = True
 
   if not st.session_state.get(state_key_fetched, False):
@@ -1575,10 +1770,17 @@ def render_combined_port_tab_content(port_name, port_code):
       ' 기준)'
   )
 
-  with st.spinner(f'{port_name} 입항 및 출항 전체 선박 정보 통합 수집 중...'):
-    in_vessels = fetch_vessel_schedule_api(port_code, 'I', sde_str, ede_str)
-    out_vessels = fetch_vessel_schedule_api(port_code, 'O', sde_str, ede_str)
-    vessels = in_vessels + out_vessels
+  try:
+    with st.spinner(f'{port_name} 입항 및 출항 신고정보 통합 수집 중...'):
+      in_vessels = fetch_vessel_schedule_api(port_code, 'I', sde_str, ede_str)
+      out_vessels = fetch_vessel_schedule_api(port_code, 'O', sde_str, ede_str)
+      vessels = in_vessels + out_vessels
+  except VesselAPIError as e:
+    st.error(
+        f'PORT-MIS 입출항 신고정보를 조회하지 못했습니다: {e} '
+        '잠시 후 다시 조회하십시오.'
+    )
+    return
 
   if not vessels:
     st.warning(
@@ -1587,12 +1789,29 @@ def render_combined_port_tab_content(port_name, port_code):
     )
     return
 
+  unique_vessel_keys = {
+      (
+          f"CALL:{str(v.get('clsgn', '')).strip().upper()}"
+          if str(v.get('clsgn', '')).strip() not in {'', '-'}
+          else f"NAME:{_normalize_vessel_text(v.get('vssl_nm', ''))}"
+      )
+      for v in vessels
+  }
+  fetched_at_kst = (
+      datetime.now(timezone.utc) + timedelta(hours=9)
+  ).strftime('%Y-%m-%d %H:%M:%S')
+
   st.success(
-      f'✅ 총 **{len(vessels)}** 척의 입출항 신고 선박 정보가 수집되었습니다.'
-      f' (입항 {len(in_vessels)}척 / 출항 {len(out_vessels)}척)'
+      f'✅ 입출항 신고 총 **{len(vessels)}건**이 수집되었습니다. '
+      f'(입항 {len(in_vessels)}건 / 출항 {len(out_vessels)}건 / '
+      f'고유 선박 {len(unique_vessel_keys)}척)'
+  )
+  st.caption(
+      f'PORT-MIS 입출항 신고자료 ｜ 최근 조회 {fetched_at_kst} KST ｜ '
+      '조회 결과는 5분간 캐시됩니다.'
   )
 
-  ALL_VIEW_OPTION = f'📋 전체선박 목록 보기 (총 {len(vessels)}척)'
+  ALL_VIEW_OPTION = f'📋 전체 입출항 신고 목록 보기 (총 {len(vessels)}건)'
   select_options = [ALL_VIEW_OPTION] + [
       f"🚢 [{v['vssl_nm']}] 구분: {v['etrynd_nm']} ｜ 호출부호: {v['clsgn']} ｜"
       f" 선종: {v['vssl_knd_nm']} ｜ 계선장소: {v['laidup_fclty_nm']}"
@@ -1741,15 +1960,26 @@ with search_tab_vssl:
     with st.spinner(
         f"해수부 선박제원 API에서 '{clean_query}' 관련 선박 검색 중..."
     ):
-      vssl_list = fetch_vessel_spec_list_api(clean_query, max_results=50)
-      st.session_state['vssl_search_results'] = vssl_list
+      try:
+        vssl_list = fetch_vessel_spec_list_api(clean_query, max_results=50)
+        st.session_state['vssl_search_results'] = vssl_list
+        st.session_state['vssl_search_error'] = ''
+      except VesselAPIError as e:
+        st.session_state['vssl_search_results'] = []
+        st.session_state['vssl_search_error'] = str(e)
       st.session_state['vssl_search_keyword'] = clean_query
 
   if 'vssl_search_results' in st.session_state:
     results = st.session_state['vssl_search_results']
     kw = st.session_state.get('vssl_search_keyword', '')
+    search_error = st.session_state.get('vssl_search_error', '')
 
-    if not results:
+    if search_error:
+      st.error(
+          f'선박제원 API를 조회하지 못했습니다: {search_error} '
+          '잠시 후 다시 검색하십시오.'
+      )
+    elif not results:
       st.warning(
           f"💡 '{kw}'에 해당하는 선박 정보를 해수부 선박제원 API에서 찾을 수"
           ' 없습니다. 철자를 확인해주세요.'
@@ -1761,8 +1991,8 @@ with search_tab_vssl:
       )
 
       vssl_labels = [
-          f"🚢 [{s['displayName']}] 호출부호: {s['clsgn']} ｜ MMSI:"
-          f" {s.get('mmsiNo', '-')} ｜ 국적: {s['vsslNlty']} ｜ 선종:"
+          f"🚢 [{s['displayName']}] 호출부호: {s['clsgn']} ｜ IMO:"
+          f" {s.get('imoNo', '-')} ｜ 국적: {s['vsslNlty']} ｜ 선종:"
           f" {s['vsslKnd']}"
           for s in results
       ]
@@ -1786,9 +2016,14 @@ with search_tab_vssl:
               use_container_width=True,
           ):
             dummy_vessel_obj = {
-                'vssl_nm': selected_spec['displayName'],
+                'vssl_nm': (
+                    selected_spec['vsslEngNm']
+                    if selected_spec['vsslEngNm'] != '-'
+                    else selected_spec['vsslKorNm']
+                ),
                 'clsgn': selected_spec.get('clsgn', kw).upper(),
                 'laidup_fclty_nm': '선박 직접 검색 결과',
+                'spec_info': selected_spec,
             }
             show_vessel_detail_dialog(dummy_vessel_obj)
 
@@ -1983,9 +2218,9 @@ if 'active_chem' in st.session_state:
 st.divider()
 
 # ------------------------------------------
-# ⚓ 실시간 항만 선박 모니터링
+# ⚓ 항만 선박 입출항 신고현황
 # ------------------------------------------
-section_title('⚓', '항만별 실시간 선박입출항현황 (PORT-MIS)')
+section_title('⚓', '항만별 PORT-MIS 입출항 신고현황 (5분 갱신)')
 
 tab_pt, tab_ds = st.tabs(['🚢 평택항 입출항 선박', '🚢 대산항 입출항 선박'])
 
